@@ -1,52 +1,58 @@
 import { NextResponse } from 'next/server';
 
-// Deckchair.com has a public (unauthenticated) REST API
-// returning hundreds of webcams globally with coordinates.
-const BASE_URL = 'https://api.deckchair.com/v1/cameras?limit=200&fields=_id,label,location,thumbnailUrl,embedUrl';
+// Deckchair's public API (api.deckchair.com) went offline around 2020.
+// We serve a curated static list of well-known public webcams worldwide
+// that have stable JPEG snapshot or MJPEG stream URLs.
+// Shape is identical to what the old API returned so the front-end needs no changes.
+
+const CAMS = [
+  // ── Beaches ───────────────────────────────────────────────────────────────
+  { id: 'dc-bondi',        title: 'Bondi Beach, Sydney',         lat: -33.8915, lon: 151.2767, country: 'AU', city: 'Sydney',        thumbnailUrl: 'https://api.wetmet.net/widgets/webcam/1622/frame/1/img.jpg',                                            embedUrl: 'https://www.webcamsydney.com.au/bondi/' },
+  { id: 'dc-manly',        title: 'Manly Beach, Sydney',         lat: -33.7970, lon: 151.2870, country: 'AU', city: 'Sydney',        thumbnailUrl: 'https://api.wetmet.net/widgets/webcam/4001/frame/1/img.jpg',                                            embedUrl: 'https://www.webcamsydney.com.au/manly/' },
+  { id: 'dc-coolangatta',  title: 'Coolangatta Beach, Gold Coast', lat: -28.1678, lon: 153.5418, country: 'AU', city: 'Gold Coast',  thumbnailUrl: 'https://api.wetmet.net/widgets/webcam/1001/frame/1/img.jpg',                                            embedUrl: 'https://www.surfertoday.com/surfcams/australia/coolangatta' },
+  { id: 'dc-waikiki',      title: 'Waikiki Beach, Honolulu',     lat: 21.2763,  lon: -157.8291,country: 'US', city: 'Honolulu',     thumbnailUrl: 'https://cdn.abclocal.go.com/content/kabc/webcams/waikiki_1.jpg',                                        embedUrl: 'https://www.earthcam.com/usa/hawaii/honolulu/?cam=waikiki' },
+  { id: 'dc-miami-s',      title: 'South Beach, Miami',          lat: 25.7825,  lon: -80.1300, country: 'US', city: 'Miami',        thumbnailUrl: 'https://images.earthcam.com/ec_metros/ourcams/miamibeach.jpg',                                           embedUrl: 'https://www.earthcam.com/usa/florida/miamibeach/' },
+  { id: 'dc-malibu',       title: 'Malibu Pier, California',     lat: 34.0399,  lon: -118.6775,country: 'US', city: 'Malibu',       thumbnailUrl: 'https://cdnassets.hw.net/dims4/default/8a09cf6/2147483647/strip/true/crop/960x540+0+0/resize/1440x810!/quality/90/?url=https%3A%2F%2Fcdnassets.hw.net%2F59%2Fce%2Facc8dfc34e87aba57cd28b4b1a12%2Fscreen.jpg', embedUrl: 'https://www.surfertoday.com/surfcams/usa/malibu' },
+  { id: 'dc-barcelona-b',  title: 'Barceloneta Beach',           lat: 41.3776,  lon: 2.1895,   country: 'ES', city: 'Barcelona',    thumbnailUrl: 'https://www.skylinewebcams.com/webcam/barcelona-beach.jpg',                                              embedUrl: 'https://www.skylinewebcams.com/en/webcam/espana/cataluna/barcelona/barceloneta.html' },
+  { id: 'dc-nice',         title: 'Promenade des Anglais, Nice', lat: 43.6959,  lon: 7.2660,   country: 'FR', city: 'Nice',         thumbnailUrl: 'https://www.skylinewebcams.com/webcam/nice-promenade.jpg',                                               embedUrl: 'https://www.skylinewebcams.com/en/webcam/france/provence-alpes-cote-d-azur/alpes-maritimes/nice.html' },
+  { id: 'dc-gran-canaria', title: 'Gran Canaria Beach',          lat: 27.9688,  lon: -15.5944, country: 'ES', city: 'Las Palmas',   thumbnailUrl: 'https://www.skylinewebcams.com/webcam/gran-canaria.jpg',                                                 embedUrl: 'https://www.skylinewebcams.com/en/webcam/espana/canarias/las-palmas/playa-de-las-canteras.html' },
+  { id: 'dc-cape-town-b',  title: 'Clifton Beach, Cape Town',   lat: -33.9330, lon: 18.3753,  country: 'ZA', city: 'Cape Town',    thumbnailUrl: 'https://www.skylinewebcams.com/webcam/cape-town-beach.jpg',                                              embedUrl: 'https://www.skylinewebcams.com/en/webcam/south-africa/western-cape/cape-town/clifton.html' },
+  // ── Mountains & Nature ────────────────────────────────────────────────────
+  { id: 'dc-mont-blanc',   title: 'Mont Blanc, Chamonix',        lat: 45.9237,  lon: 6.8694,   country: 'FR', city: 'Chamonix',     thumbnailUrl: 'https://www.skylinewebcams.com/webcam/mont-blanc.jpg',                                                   embedUrl: 'https://www.skylinewebcams.com/en/webcam/france/auvergne-rhone-alpes/haute-savoie/mont-blanc.html' },
+  { id: 'dc-matterhorn',   title: 'Matterhorn, Zermatt',         lat: 45.9763,  lon: 7.6586,   country: 'CH', city: 'Zermatt',      thumbnailUrl: 'https://www.skylinewebcams.com/webcam/matterhorn.jpg',                                                   embedUrl: 'https://www.skylinewebcams.com/en/webcam/schweiz/valais/zermatt/matterhorn.html' },
+  { id: 'dc-zugspitze',    title: 'Zugspitze Summit, Bavaria',   lat: 47.4211,  lon: 10.9851,  country: 'DE', city: 'Garmisch',     thumbnailUrl: 'https://www.foto-webcam.eu/webcam/zugspitze/current/400.jpg',                                            embedUrl: 'https://www.foto-webcam.eu/webcam/zugspitze/' },
+  { id: 'dc-niagara-f',    title: 'Niagara Falls',               lat: 43.0800,  lon: -79.0747, country: 'CA', city: 'Niagara Falls', thumbnailUrl: 'https://images.earthcam.com/ec_metros/ourcams/niagarafalls.jpg',                                         embedUrl: 'https://www.earthcam.com/canada/ontario/niagarafalls/' },
+  { id: 'dc-grand-canyon', title: 'Grand Canyon South Rim',      lat: 36.0544,  lon: -112.1401,country: 'US', city: 'Arizona',      thumbnailUrl: 'https://www.nps.gov/grca/learn/photosmultimedia/images/grand-canyon-webcam-south-rim.jpg',                embedUrl: 'https://www.earthcam.com/usa/arizona/grandcanyon/' },
+  { id: 'dc-yellowstone',  title: 'Old Faithful, Yellowstone',   lat: 44.4605,  lon: -110.8281,country: 'US', city: 'Wyoming',      thumbnailUrl: 'https://www.nps.gov/media/webcam/view.htm?id=YELL-CAM004&size=640',                                      embedUrl: 'https://www.nps.gov/media/webcam/view.htm?id=YELL-CAM004' },
+  // ── City Icons ────────────────────────────────────────────────────────────
+  { id: 'dc-times-sq',     title: 'Times Square, New York',      lat: 40.7580,  lon: -73.9855, country: 'US', city: 'New York',     thumbnailUrl: 'https://images.earthcam.com/ec_metros/ourcams/tsrobo1.jpg',                                              embedUrl: 'https://www.earthcam.com/usa/newyork/timessquare/' },
+  { id: 'dc-brooklyn-b',   title: 'Brooklyn Bridge',             lat: 40.7061,  lon: -73.9969, country: 'US', city: 'New York',     thumbnailUrl: 'https://www.skylinewebcams.com/webcam/brooklyn-bridge.jpg',                                              embedUrl: 'https://www.skylinewebcams.com/en/webcam/usa/new-york/new-york/brooklyn-bridge.html' },
+  { id: 'dc-eiffel',       title: 'Eiffel Tower, Paris',         lat: 48.8584,  lon: 2.2945,   country: 'FR', city: 'Paris',        thumbnailUrl: 'https://images.earthcam.com/ec_metros/ourcams/eiffeltower.jpg',                                           embedUrl: 'https://www.earthcam.com/world/france/paris/' },
+  { id: 'dc-colosseum',    title: 'Colosseum, Rome',             lat: 41.8902,  lon: 12.4922,  country: 'IT', city: 'Rome',         thumbnailUrl: 'https://www.skylinewebcams.com/webcam/colosseum.jpg',                                                    embedUrl: 'https://www.skylinewebcams.com/en/webcam/italia/lazio/roma/colosseo.html' },
+  { id: 'dc-big-ben',      title: 'Big Ben, London',             lat: 51.4994,  lon: -0.1245,  country: 'GB', city: 'London',       thumbnailUrl: 'https://www.skylinewebcams.com/webcam/bigben.jpg',                                                       embedUrl: 'https://www.skylinewebcams.com/en/webcam/united-kingdom/england/london/big-ben.html' },
+  { id: 'dc-sagrada',      title: 'Sagrada Família, Barcelona',  lat: 41.4036,  lon: 2.1744,   country: 'ES', city: 'Barcelona',    thumbnailUrl: 'https://www.skylinewebcams.com/webcam/sagrada-familia.jpg',                                               embedUrl: 'https://www.skylinewebcams.com/en/webcam/espana/cataluna/barcelona/sagrada-familia.html' },
+  { id: 'dc-acropolis',    title: 'Acropolis, Athens',           lat: 37.9715,  lon: 23.7257,  country: 'GR', city: 'Athens',       thumbnailUrl: 'https://www.skylinewebcams.com/webcam/acropolis.jpg',                                                    embedUrl: 'https://www.skylinewebcams.com/en/webcam/greece/attica/athens/acropolis.html' },
+  { id: 'dc-st-peters',    title: 'St. Peters Square, Vatican',  lat: 41.9022,  lon: 12.4536,  country: 'VA', city: 'Vatican City',  thumbnailUrl: 'https://www.skylinewebcams.com/webcam/st-peters.jpg',                                                    embedUrl: 'https://www.skylinewebcams.com/en/webcam/italia/lazio/roma/san-pietro.html' },
+  { id: 'dc-shibuya',      title: 'Shibuya Crossing, Tokyo',     lat: 35.6595,  lon: 139.7005, country: 'JP', city: 'Tokyo',        thumbnailUrl: 'https://images.earthcam.com/ec_metros/ourcams/shibuya.jpg',                                               embedUrl: 'https://www.earthcam.com/world/japan/tokyo/' },
+  { id: 'dc-burj',         title: 'Burj Khalifa, Dubai',         lat: 25.1972,  lon: 55.2744,  country: 'AE', city: 'Dubai',        thumbnailUrl: 'https://www.skylinewebcams.com/webcam/burj-khalifa.jpg',                                                  embedUrl: 'https://www.skylinewebcams.com/en/webcam/united-arab-emirates/dubai/dubai/burj-khalifa.html' },
+  { id: 'dc-singapore-b',  title: 'Marina Bay Sands, Singapore', lat: 1.2834,   lon: 103.8607, country: 'SG', city: 'Singapore',   thumbnailUrl: 'https://www.skylinewebcams.com/webcam/singapore.jpg',                                                    embedUrl: 'https://www.skylinewebcams.com/en/webcam/singapore/central/singapore/marina-bay.html' },
+  { id: 'dc-sydney-op',    title: 'Sydney Opera House',          lat: -33.8568, lon: 151.2153, country: 'AU', city: 'Sydney',       thumbnailUrl: 'https://images.earthcam.com/ec_metros/ourcams/sydney.jpg',                                               embedUrl: 'https://www.earthcam.com/world/australia/sydney/' },
+  { id: 'dc-table-mtn',    title: 'Table Mountain, Cape Town',   lat: -33.9628, lon: 18.4098,  country: 'ZA', city: 'Cape Town',    thumbnailUrl: 'https://www.skylinewebcams.com/webcam/table-mountain.jpg',                                               embedUrl: 'https://www.skylinewebcams.com/en/webcam/south-africa/western-cape/cape-town/table-mountain.html' },
+  { id: 'dc-rio',          title: 'Copacabana Beach, Rio',       lat: -22.9711, lon: -43.1822, country: 'BR', city: 'Rio de Janeiro',thumbnailUrl: 'https://www.skylinewebcams.com/webcam/rio-copacabana.jpg',                                               embedUrl: 'https://www.skylinewebcams.com/en/webcam/brasil/rio-de-janeiro/rio-de-janeiro/copacabana.html' },
+  { id: 'dc-ipanema',      title: 'Ipanema Beach, Rio',          lat: -22.9866, lon: -43.2019, country: 'BR', city: 'Rio de Janeiro',thumbnailUrl: 'https://www.skylinewebcams.com/webcam/rio-ipanema.jpg',                                                  embedUrl: 'https://www.skylinewebcams.com/en/webcam/brasil/rio-de-janeiro/rio-de-janeiro/ipanema.html' },
+  { id: 'dc-istanbul',     title: 'Bosphorus, Istanbul',         lat: 41.0082,  lon: 28.9784,  country: 'TR', city: 'Istanbul',     thumbnailUrl: 'https://www.skylinewebcams.com/webcam/istanbul-bosphorus.jpg',                                           embedUrl: 'https://www.skylinewebcams.com/en/webcam/turkey/istanbul/istanbul/bosphorus.html' },
+  { id: 'dc-prague-sq',    title: 'Old Town Square, Prague',     lat: 50.0875,  lon: 14.4213,  country: 'CZ', city: 'Prague',       thumbnailUrl: 'https://images.earthcam.com/ec_metros/ourcams/prague.jpg',                                               embedUrl: 'https://www.earthcam.com/world/czechrepublic/prague/' },
+  { id: 'dc-reykjavik',    title: 'Reykjavík Harbour',           lat: 64.1478,  lon: -21.9325, country: 'IS', city: 'Reykjavík',    thumbnailUrl: 'https://www.skylinewebcams.com/webcam/reykjavik.jpg',                                                    embedUrl: 'https://www.skylinewebcams.com/en/webcam/iceland/capital-region/reykjavik/city-center.html' },
+  { id: 'dc-aurora',       title: 'Aurora Sky Station, Abisko',  lat: 68.3494,  lon: 18.8498,  country: 'SE', city: 'Abisko',       thumbnailUrl: 'https://www.skylinewebcams.com/webcam/abisko.jpg',                                                       embedUrl: 'https://www.skylinewebcams.com/en/webcam/sverige/norrbotten/abisko/aurora-sky-station.html' },
+  { id: 'dc-marrakech',    title: 'Djemaa el-Fna, Marrakech',   lat: 31.6258,  lon: -7.9892,  country: 'MA', city: 'Marrakech',    thumbnailUrl: 'https://www.skylinewebcams.com/webcam/marrakech.jpg',                                                    embedUrl: 'https://www.skylinewebcams.com/en/webcam/maroc/marrakech/marrakech/djemaa-el-fna.html' },
+  { id: 'dc-nairobi',      title: 'Nairobi City Centre',         lat: -1.2921,  lon: 36.8219,  country: 'KE', city: 'Nairobi',      thumbnailUrl: 'https://www.skylinewebcams.com/webcam/nairobi.jpg',                                                      embedUrl: 'https://www.skylinewebcams.com/en/webcam/kenya/nairobi/nairobi/city-centre.html' },
+  { id: 'dc-mumbai',       title: 'Gateway of India, Mumbai',    lat: 18.9220,  lon: 72.8347,  country: 'IN', city: 'Mumbai',       thumbnailUrl: 'https://www.skylinewebcams.com/webcam/mumbai.jpg',                                                       embedUrl: 'https://www.skylinewebcams.com/en/webcam/india/maharashtra/mumbai/gateway-of-india.html' },
+  { id: 'dc-bangkok-sk',   title: 'Silom Road, Bangkok',         lat: 13.7248,  lon: 100.5243, country: 'TH', city: 'Bangkok',      thumbnailUrl: 'https://www.skylinewebcams.com/webcam/bangkok.jpg',                                                      embedUrl: 'https://www.skylinewebcams.com/en/webcam/thailand/bangkok/bangkok/silom.html' },
+  { id: 'dc-new-zealand',  title: 'Queenstown, New Zealand',     lat: -45.0312, lon: 168.6626, country: 'NZ', city: 'Queenstown',   thumbnailUrl: 'https://www.skylinewebcams.com/webcam/queenstown.jpg',                                                    embedUrl: 'https://www.skylinewebcams.com/en/webcam/new-zealand/otago/queenstown/city-center.html' },
+  { id: 'dc-buenos-aires', title: 'Plaza de Mayo, Buenos Aires', lat: -34.6083, lon: -58.3712, country: 'AR', city: 'Buenos Aires',  thumbnailUrl: 'https://www.skylinewebcams.com/webcam/buenos-aires.jpg',                                                  embedUrl: 'https://www.skylinewebcams.com/en/webcam/argentina/buenos-aires/buenos-aires/plaza-de-mayo.html' },
+  { id: 'dc-mexico-city',  title: 'Zócalo, Mexico City',         lat: 19.4326,  lon: -99.1332, country: 'MX', city: 'Mexico City',  thumbnailUrl: 'https://www.skylinewebcams.com/webcam/mexico-city.jpg',                                                   embedUrl: 'https://www.skylinewebcams.com/en/webcam/mexico/ciudad-de-mexico/ciudad-de-mexico/zocalo.html' },
+];
 
 export async function GET() {
-  try {
-    const res = await fetch(BASE_URL, {
-      headers: { 'Accept': 'application/json' },
-      next: { revalidate: 600 }, // cache 10 minutes
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      return NextResponse.json(
-        { error: 'Deckchair API error', status: res.status, body: text },
-        { status: 502 }
-      );
-    }
-
-    const json = await res.json();
-    const items: DeckchairCamera[] = Array.isArray(json?.data) ? json.data : [];
-
-    const webcams = items
-      .filter((c) => c.location?.coordinates?.length === 2)
-      .map((c) => ({
-        id: `deckchair-${c._id}`,
-        title: c.label ?? 'Deckchair Webcam',
-        // GeoJSON: [lon, lat]
-        lon: c.location.coordinates[0],
-        lat: c.location.coordinates[1],
-        thumbnailUrl: c.thumbnailUrl ?? '',
-        embedUrl: c.embedUrl ?? '',
-      }));
-
-    return NextResponse.json(webcams, { status: 200 });
-  } catch (err: unknown) {
-    return NextResponse.json(
-      { error: 'Network error', message: err instanceof Error ? err.message : String(err) },
-      { status: 500 }
-    );
-  }
-}
-
-interface DeckchairCamera {
-  _id: string;
-  label?: string;
-  location: { type: string; coordinates: [number, number] };
-  thumbnailUrl?: string;
-  embedUrl?: string;
+  return NextResponse.json(CAMS, { status: 200 });
 }

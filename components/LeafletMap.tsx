@@ -30,20 +30,42 @@ function makeIcon(url: string) {
   return new L.Icon({ iconUrl: url, iconRetinaUrl: url.replace('.png', '-2x.png'), shadowUrl: SHADOW_URL, iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41] });
 }
 
-// ── Dark CartoDB tile URL ──
-const DARK_TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png';
+const DARK_TILE_URL    = 'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png';
 const DARK_TILE_LABELS = 'https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png';
 const CARTO_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions" target="_blank">CARTO</a>';
 
-// ── Inline dark popup overrides (injected once) ──
-const DARK_POPUP_STYLE = `
-  .leaflet-popup-content { color: #e6edf3; }
-  .leaflet-popup-content strong { color: #f0f6fc; }
-  .leaflet-popup-content span { color: #8b949e; }
-`;
+// ── Shared popup preview image ──────────────────────────────────────────────
+function PreviewImg({ src, alt }: { src: string; alt: string }) {
+  if (!src) return null;
+  return (
+    <div style={{ marginTop: 7 }}>
+      <img
+        src={src}
+        alt={alt}
+        style={{ maxWidth: 248, width: '100%', borderRadius: 6, display: 'block', background: '#0d1117' }}
+        loading="lazy"
+        onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+      />
+    </div>
+  );
+}
+
+// ── Shared popup link ────────────────────────────────────────────────────────
+function PopupLink({ href, label }: { href: string; label: string }) {
+  if (!href) return null;
+  return (
+    <div style={{ marginTop: 5 }}>
+      <a href={href} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11 }}>{label} ↗</a>
+    </div>
+  );
+}
+
+// ── Shared source badge ──────────────────────────────────────────────────────
+function SourceBadge({ label, color }: { label: string; color: string }) {
+  return <div style={{ marginTop: 5, fontSize: 10, fontWeight: 700, color, letterSpacing: '0.04em' }}>SOURCE: {label}</div>;
+}
 
 export default function LeafletMap() {
-  // ── Windy count driven by <WindyLayer> via callback ──
   const [windyCount,  setWindyCount]  = useState(0);
   const windyCountRef = useRef(windyCount);
   const handleWindyCount = useCallback((n: number) => {
@@ -64,7 +86,7 @@ export default function LeafletMap() {
     { windy: true, skyline: true, earthcam: true, osm: true, deckchair: true }
   );
   const [euVisible,   setEuVisible]   = useState<Record<string, boolean>>(
-    Object.fromEntries(Object.keys(EU_COUNTRIES).map(k  => [k,  true]))
+    Object.fromEntries(Object.keys(EU_COUNTRIES).map(k => [k, true]))
   );
   const [asiaVisible, setAsiaVisible] = useState<Record<string, boolean>>(
     Object.fromEntries(Object.keys(ASIA_SOURCES).map(k => [k, true]))
@@ -76,7 +98,6 @@ export default function LeafletMap() {
     return r;
   }, []);
 
-  // ── Fetch all non-Windy sources once on mount ──
   useEffect(() => {
     const fetchAll = async () => {
       setLoading(true); setErrors([]);
@@ -86,32 +107,24 @@ export default function LeafletMap() {
       };
       await Promise.all([
         safe('Skyline', async () => {
-          const r = await fetch('/api/skyline-webcams', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({}),
-          });
+          const r = await fetch('/api/skyline-webcams', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
           const j = await r.json();
-          if (!r.ok) errs.push(`Skyline: ${j?.error ?? r.statusText}`);
-          else setSkylineCams(toArray(j));
+          if (!r.ok) errs.push(`Skyline: ${j?.error ?? r.statusText}`); else setSkylineCams(toArray(j));
         }),
         safe('EarthCam', async () => {
           const r = await fetch('/api/earthcam');
           const j = await r.json();
-          if (!r.ok) errs.push(`EarthCam: ${j?.error ?? r.statusText}`);
-          else setEarthCams(toArray(j));
+          if (!r.ok) errs.push(`EarthCam: ${j?.error ?? r.statusText}`); else setEarthCams(toArray(j));
         }),
         safe('OSM', async () => {
           const r = await fetch('/api/overpass-webcams');
           const j = await r.json();
-          if (!r.ok) errs.push(`OSM: ${j?.error ?? r.statusText}`);
-          else setOsmCams(toArray(j));
+          if (!r.ok) errs.push(`OSM: ${j?.error ?? r.statusText}`); else setOsmCams(toArray(j));
         }),
         safe('Deckchair', async () => {
           const r = await fetch('/api/deckchair');
           const j = await r.json();
-          if (!r.ok) errs.push(`Deckchair: ${j?.error ?? r.statusText}`);
-          else setDeckCams(toArray(j));
+          if (!r.ok) errs.push(`Deckchair: ${j?.error ?? r.statusText}`); else setDeckCams(toArray(j));
         }),
       ]);
       setErrors(errs); setLoading(false);
@@ -122,16 +135,13 @@ export default function LeafletMap() {
   const globalTotal = windyCount + skylineCams.length + earthCams.length + osmCams.length + deckCams.length;
   const grandTotal  = globalTotal + asiaCount + euCount;
 
-  // ── Styles ──
   const legendStyle: React.CSSProperties = {
     position: 'absolute', bottom: 24, right: 12, zIndex: 1000,
-    background: 'rgba(13,17,23,0.96)',
-    color: '#e6edf3',
-    border: '1px solid #30363d',
-    borderRadius: 12, padding: '12px 14px', fontSize: 12,
+    background: 'rgba(13,17,23,0.96)', color: '#e6edf3',
+    border: '1px solid #30363d', borderRadius: 12, padding: '12px 14px', fontSize: 12,
     display: 'flex', flexDirection: 'column', gap: 6,
-    backdropFilter: 'blur(12px)',
-    minWidth: 210, maxHeight: 'calc(100vh - 48px)', overflowY: 'auto',
+    backdropFilter: 'blur(12px)', minWidth: 210,
+    maxHeight: 'calc(100vh - 48px)', overflowY: 'auto',
     boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
   };
 
@@ -150,13 +160,9 @@ export default function LeafletMap() {
   );
 
   const toggle = (
-    key: string,
-    state: Record<string, boolean>,
+    key: string, state: Record<string, boolean>,
     setter: React.Dispatch<React.SetStateAction<Record<string, boolean>>>,
-    color: string,
-    markerUrl: string,
-    label: string,
-    count: number,
+    color: string, markerUrl: string, label: string, count: number,
   ) => (
     <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', opacity: state[key] ? 1 : 0.35, transition: 'opacity 0.2s', paddingLeft: 8 }}>
       <input type="checkbox" checked={!!state[key]} onChange={() => setter(s => ({ ...s, [key]: !s[key] }))} style={{ accentColor: color, width: 13, height: 13 }} />
@@ -168,48 +174,25 @@ export default function LeafletMap() {
 
   return (
     <main style={{ height: '100vh', width: '100vw', position: 'relative', fontFamily: 'system-ui, sans-serif', background: '#0d1117' }}>
-
-      {/* ── Dark popup style injection ── */}
-      <style dangerouslySetInnerHTML={{ __html: DARK_POPUP_STYLE }} />
-
       <MapContainer center={[20, 0]} zoom={2} scrollWheelZoom style={{ height: '100%', width: '100%', background: '#0d1117' }}>
-
-        {/* ── CartoDB Dark base layer ── */}
         <TileLayer attribution={CARTO_ATTR} url={DARK_TILE_URL} />
-        {/* ── CartoDB label overlay (renders city/country names on top) ── */}
         <TileLayer url={DARK_TILE_LABELS} />
 
-        {/* ── Windy — viewport-aware, re-fetches on pan/zoom ── */}
-        <WindyLayer
-          enabled={visible.windy}
-          onCountChange={handleWindyCount}
-          debounceMs={600}
-          limit={50}
-        />
+        {/* ── Windy ── */}
+        <WindyLayer enabled={visible.windy} onCountChange={handleWindyCount} debounceMs={600} limit={50} />
 
         {/* ── Skyline ── */}
         {visible.skyline && skylineCams.map(cam => {
           if (!cam.lat || !cam.lon) return null;
           return (
             <Marker key={`skyline-${cam.id}`} position={[cam.lat, cam.lon]} icon={icons.skyline}>
-              <Popup maxWidth={260}>
-                <strong>{cam.title}</strong><br />
-                <span style={{ fontSize: 11 }}>{[cam.city, cam.country].filter(Boolean).join(', ')}</span>
-                {cam.tags?.length > 0 && (
-                  <span style={{ fontSize: 10, marginLeft: 5, color: '#6e7681' }}>{cam.tags.map((t: string) => `#${t}`).join(' ')}</span>
-                )}
-                {cam.weather?.temp && (
-                  <div style={{ fontSize: 11, marginTop: 3 }}>{cam.weather.temp} • {cam.weather.condition}</div>
-                )}
-                {cam.snapshotUrl && (
-                  <div style={{ marginTop: 6 }}>
-                    <img src={cam.snapshotUrl} alt={cam.title} style={{ maxWidth: 240, borderRadius: 6 }} loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                  </div>
-                )}
-                {cam.url && (
-                  <div style={{ marginTop: 4 }}><a href={cam.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11 }}>Open on Skyline ↗</a></div>
-                )}
-                <div style={{ marginTop: 4, fontSize: 10, color: '#f87171', fontWeight: 600 }}>SOURCE: SKYLINE</div>
+              <Popup maxWidth={270}>
+                <strong style={{ fontSize: 13 }}>{cam.title}</strong>
+                <div style={{ fontSize: 11, color: '#8b949e', marginTop: 2 }}>{[cam.city, cam.country].filter(Boolean).join(', ')}</div>
+                {cam.weather?.temp && <div style={{ fontSize: 11, marginTop: 2 }}>{cam.weather.temp} · {cam.weather.condition}</div>}
+                <PreviewImg src={cam.snapshotUrl} alt={cam.title} />
+                <PopupLink href={cam.url} label="Open on Skyline" />
+                <SourceBadge label="SKYLINE" color="#f87171" />
               </Popup>
             </Marker>
           );
@@ -218,12 +201,12 @@ export default function LeafletMap() {
         {/* ── EarthCam ── */}
         {visible.earthcam && earthCams.map(cam => (
           <Marker key={cam.id} position={[cam.lat, cam.lon]} icon={icons.earthcam}>
-            <Popup maxWidth={260}>
-              <strong>{cam.title}</strong><br />
-              <span style={{ fontSize: 11 }}>{[cam.city, cam.country].filter(Boolean).join(', ')}</span>
-              <div style={{ marginTop: 6 }}><img src={cam.imageUrl} alt={cam.title} style={{ maxWidth: 240, borderRadius: 6 }} loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} /></div>
-              <div style={{ marginTop: 4 }}><a href={cam.embedUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11 }}>Open on EarthCam ↗</a></div>
-              <div style={{ marginTop: 4, fontSize: 10, color: '#fb923c', fontWeight: 600 }}>SOURCE: EARTHCAM</div>
+            <Popup maxWidth={270}>
+              <strong style={{ fontSize: 13 }}>{cam.title}</strong>
+              <div style={{ fontSize: 11, color: '#8b949e', marginTop: 2 }}>{[cam.city, cam.country].filter(Boolean).join(', ')}</div>
+              <PreviewImg src={cam.imageUrl} alt={cam.title} />
+              <PopupLink href={cam.embedUrl} label="Open on EarthCam" />
+              <SourceBadge label="EARTHCAM" color="#fb923c" />
             </Popup>
           </Marker>
         ))}
@@ -231,37 +214,42 @@ export default function LeafletMap() {
         {/* ── OSM / Overpass ── */}
         {visible.osm && osmCams.map(cam => (
           <Marker key={cam.id} position={[cam.lat, cam.lon]} icon={icons.osm}>
-            <Popup maxWidth={260}>
-              <strong>{cam.title}</strong><br />
-              {(cam.city || cam.country) && <span style={{ fontSize: 11 }}>{[cam.city, cam.country].filter(Boolean).join(', ')}<br /></span>}
-              {cam.operator && <span style={{ fontSize: 11 }}>Operator: {cam.operator}<br /></span>}
-              <div style={{ marginTop: 4 }}><a href={cam.webcamUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11 }}>Open stream ↗</a></div>
-              <div style={{ marginTop: 4, fontSize: 10, color: '#4ade80', fontWeight: 600 }}>SOURCE: OPENSTREETMAP</div>
+            <Popup maxWidth={270}>
+              <strong style={{ fontSize: 13 }}>{cam.title}</strong>
+              {(cam.city || cam.country) && <div style={{ fontSize: 11, color: '#8b949e', marginTop: 2 }}>{[cam.city, cam.country].filter(Boolean).join(', ')}</div>}
+              {cam.operator && <div style={{ fontSize: 11, color: '#6e7681', marginTop: 2 }}>Op: {cam.operator}</div>}
+              <PreviewImg src={(cam as OsmWebcam & { thumbnailUrl?: string }).thumbnailUrl ?? ''} alt={cam.title} />
+              <PopupLink href={cam.webcamUrl} label="Open stream" />
+              <SourceBadge label="OPENSTREETMAP" color="#4ade80" />
             </Popup>
           </Marker>
         ))}
 
-        {/* ── Deckchair ── */}
+        {/* ── Deckchair (curated static list) ── */}
         {visible.deckchair && deckCams.map(cam => (
           <Marker key={cam.id} position={[cam.lat, cam.lon]} icon={icons.deckchair}>
-            <Popup maxWidth={260}>
-              <strong>{cam.title}</strong>
-              {cam.thumbnailUrl && <div style={{ marginTop: 6 }}><img src={cam.thumbnailUrl} alt={cam.title} style={{ maxWidth: 240, borderRadius: 6 }} loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} /></div>}
-              {cam.embedUrl && <div style={{ marginTop: 4 }}><a href={cam.embedUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11 }}>Open on Deckchair ↗</a></div>}
-              <div style={{ marginTop: 4, fontSize: 10, color: '#c084fc', fontWeight: 600 }}>SOURCE: DECKCHAIR</div>
+            <Popup maxWidth={270}>
+              <strong style={{ fontSize: 13 }}>{cam.title}</strong>
+              {(cam as DeckchairWebcam & { city?: string; country?: string }).city && (
+                <div style={{ fontSize: 11, color: '#8b949e', marginTop: 2 }}>
+                  {[(cam as DeckchairWebcam & { city?: string; country?: string }).city, (cam as DeckchairWebcam & { city?: string; country?: string }).country].filter(Boolean).join(', ')}
+                </div>
+              )}
+              <PreviewImg src={cam.thumbnailUrl} alt={cam.title} />
+              <PopupLink href={cam.embedUrl} label="Open webcam" />
+              <SourceBadge label="DECKCHAIR" color="#c084fc" />
             </Popup>
           </Marker>
         ))}
 
-        {/* ── EU Traffic Layer ── */}
+        {/* ── EU Traffic ── */}
         <EUTrafficLayer visible={euVisible} onLoad={setEuCount} />
 
-        {/* ── Asia Layer ── */}
+        {/* ── Asia ── */}
         <AsiaWebcamsLayer visible={asiaVisible} onLoad={setAsiaCount} />
-
       </MapContainer>
 
-      {/* ── Legend panel ── */}
+      {/* ── Legend ── */}
       <div style={legendStyle}>
         <div style={{ fontWeight: 700, fontSize: 13, color: '#f0f6fc', letterSpacing: '0.02em' }}>🌍 World Webcams</div>
         <div style={{ fontSize: 11, color: '#484f58', marginBottom: 2 }}>{grandTotal.toLocaleString()} cameras loaded</div>
@@ -295,14 +283,12 @@ export default function LeafletMap() {
         )}
       </div>
 
-      {/* ── Loading toast ── */}
       {loading && (
         <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 1000, padding: '8px 14px', background: 'rgba(13,17,23,0.95)', color: '#e6edf3', border: '1px solid #30363d', borderRadius: 8, fontSize: 13, backdropFilter: 'blur(8px)', boxShadow: '0 4px 16px rgba(0,0,0,0.5)' }}>
           ⏳ Loading webcam sources…
         </div>
       )}
 
-      {/* ── Error toasts ── */}
       {errors.map((msg, i) => (
         <div key={i} style={{ position: 'absolute', top: 12 + i * 44, left: 12, zIndex: 1000, padding: '8px 14px', background: 'rgba(139,0,0,0.88)', color: '#fca5a5', border: '1px solid #f87171', borderRadius: 8, fontSize: 12, maxWidth: 360, backdropFilter: 'blur(6px)' }}>
           ⚠ {msg}
