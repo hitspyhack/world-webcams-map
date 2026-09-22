@@ -227,10 +227,15 @@ function MapInner({
     return result;
   }, []);
 
-  // Live windy count (stable callback via ref guard in MapClient)
+  // Live windy count (state — must be state, not just a ref, so the legend rerenders)
+  const [windyCount, setWindyCountLocal] = useState(0);
   const windyCountRef = useRef(0);
   const handleWindyCount = useCallback((n: number) => {
-    if (n !== windyCountRef.current) { windyCountRef.current = n; onWindyCount(n); }
+    if (n !== windyCountRef.current) {
+      windyCountRef.current = n;
+      setWindyCountLocal(n);
+      onWindyCount(n);
+    }
   }, [onWindyCount]);
 
   // Legend source counts
@@ -240,7 +245,7 @@ function MapInner({
   useEffect(() => { onAsiaCount(asiaCount); }, [asiaCount, onAsiaCount]);
 
   const counts = useMemo<Partial<Record<string, number>>>(() => ({
-    windy:     windyCountRef.current,
+    windy:     windyCount,  // use state — not the stale ref
     skyline:   skylineCams.length,
     earthcam:  earthCams.length,
     osm:       osmCams.length,
@@ -253,7 +258,7 @@ function MapInner({
       (acc: Map<string, number>, [k, v]: [string, number]) => { acc.set(k, (acc.get(k) ?? 0) + v); return acc; },
       new Map<string, number>()
     )),
-  }), [skylineCams, earthCams, osmCams, deckCams, euCams, asiaCams]);
+  }), [windyCount, skylineCams, earthCams, osmCams, deckCams, euCams, asiaCams]);
 
   return (
     <>
@@ -412,12 +417,6 @@ export default function LeafletMap(props: LeafletMapProps) {
       style={{ height: '100vh', width: '100vw', background: '#04080f' }}
       worldCopyJump
     >
-      {/*
-        Free dark basemap — Stadia Maps AlidadeSmoothDark.
-        No API key required for tile requests without a Stadia account
-        (fair-use policy covers low-volume / dev usage).
-        Attribution required by ODbL + Stadia terms.
-      */}
       <TileLayer
         url="https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png"
         attribution='&copy; <a href="https://stadiamaps.com/" target="_blank">Stadia Maps</a> &copy; <a href="https://openmaptiles.org/" target="_blank">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>'

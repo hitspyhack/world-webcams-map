@@ -81,10 +81,12 @@ export function useWindyWebcams({
         return;
       }
 
-      const list: WindyWebcam[] = Array.isArray(json)
-        ? json
-        : Array.isArray(json?.webcams)
-          ? json.webcams
+      // Windy API v3 wraps results under { webcams: [...] }.
+      // Fall back to a bare array for any future API shape change.
+      const list: WindyWebcam[] = Array.isArray(json?.webcams)
+        ? json.webcams
+        : Array.isArray(json)
+          ? json
           : [];
 
       setWebcams(list);

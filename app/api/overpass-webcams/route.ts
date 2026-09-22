@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server';
 
-// Two public mirrors — tried in order, first success wins.
+// Four public mirrors — tried in order, first success wins.
 const MIRRORS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
   'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+  'https://overpass.openstreetmap.ru/api/interpreter',
 ];
 
 // 6 regional bounding boxes covering the inhabited world.
@@ -22,7 +23,7 @@ function buildQuery(bbox: string): string {
   return (
     `[out:json][timeout:25][bbox:${bbox}];` +
     `(node["contact:webcam"];node["webcam"];);` +
-    `out body 150;`
+    `out body 250;`
   );
 }
 

@@ -1,8 +1,9 @@
 'use client';
 
 import L from 'leaflet';
-import { useEffect, useMemo } from 'react';
-import { Marker, Popup } from 'react-leaflet';
+import { useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import { Marker, Popup, useMap } from 'react-leaflet';
 import { useWindyWebcams } from '../hooks/useWindyWebcams';
 import type { WindyWebcam } from '../types/webcam';
 import type { CamLightboxEntry } from './CamLightbox';
@@ -21,14 +22,52 @@ function makeIcon() {
   });
 }
 
+/**
+ * Guard that a cam has valid coords, a non-empty title, AND at least a
+ * preview image OR an outbound URL — so we never render a useless pin.
+ *
+ * Handles both the Windy API v3 response shape (image / urls) and any
+ * legacy shape that used `images` / direct URL strings.
+ */
 function isPopulated(cam: WindyWebcam): boolean {
   const loc = cam.location;
   if (!loc) return false;
   const { latitude: lat, longitude: lon } = loc;
   if (lat == null || lon == null || !isFinite(lat) || !isFinite(lon)) return false;
   if (!cam.title?.trim()) return false;
-  return !!cam.images?.current?.preview || !!cam.urls?.webcam || !!cam.urls?.detail;
+
+  // API v3 uses `image` (singular); some internal shapes use `images`
+  const preview =
+    (cam as unknown as Record<string, unknown> & { image?: { current?: { preview?: string } } })
+      .image?.current?.preview ??
+    cam.images?.current?.preview;
+
+  const webcamUrl =
+    cam.urls?.webcam ??
+    cam.urls?.detail ??
+    cam.urls?.player;
+
+  return !!(preview || webcamUrl);
 }
+
+/** Stable overlay div mounted once inside the Leaflet container. */
+function useOverlayDiv(className: string) {
+  const map   = useMap();
+  const elRef = useRef<HTMLDivElement | null>(null);
+  if (!elRef.current) {
+    const div = document.createElement('div');
+    div.className = className;
+    map.getContainer().appendChild(div);
+    elRef.current = div;
+  }
+  useEffect(() => () => { elRef.current?.remove(); }, []);
+  return elRef.current;
+}
+
+const BADGE_BASE: React.CSSProperties = {
+  position: 'absolute', bottom: 80, left: 12, zIndex: 1000,
+  padding: '5px 11px', borderRadius: 8, fontSize: 11, pointerEvents: 'none',
+};
 
 interface WindyLayerProps {
   enabled: boolean;
@@ -53,6 +92,8 @@ export default function WindyLayer({
   limit = 50,
 }: WindyLayerProps) {
   const icon = useMemo(makeIcon, []);
+  const overlayEl = useOverlayDiv('windy-status-overlay');
+
   const { webcams, loading, error, missingKey } = useWindyWebcams({
     enabled,
     debounceMs,
@@ -78,40 +119,38 @@ export default function WindyLayer({
 
   if (!enabled) return null;
 
+  // Status badge lives in a portal outside the react-leaflet SVG tree
+  const badge = loading ? (
+    <div style={{ ...BADGE_BASE, background: 'rgba(11,18,32,0.82)', color: '#fff', backdropFilter: 'blur(6px)' }}>
+      ⟳ Windy: loading…
+    </div>
+  ) : error && !missingKey ? (
+    <div style={{ ...BADGE_BASE, background: 'rgba(161,44,68,0.9)', color: '#fff' }}>
+      ⚠ Windy: {error}
+    </div>
+  ) : missingKey ? (
+    <div style={{ ...BADGE_BASE, background: 'rgba(30,30,40,0.82)', color: '#8b949e', backdropFilter: 'blur(6px)' }}>
+      🔑 Windy disabled — add WINDY_WEBCAMS_API_KEY to .env.local
+    </div>
+  ) : null;
+
   return (
     <>
-      {loading && (
-        <div style={{
-          position: 'absolute', bottom: 80, left: 12, zIndex: 1000,
-          padding: '5px 11px', background: 'rgba(11,18,32,0.82)',
-          color: '#fff', borderRadius: 8, fontSize: 11,
-          backdropFilter: 'blur(6px)', pointerEvents: 'none',
-        }}>⟳ Windy: loading…</div>
-      )}
-      {error && !loading && !missingKey && (
-        <div style={{
-          position: 'absolute', bottom: 80, left: 12, zIndex: 1000,
-          padding: '5px 11px', background: 'rgba(161,44,68,0.9)',
-          color: '#fff', borderRadius: 8, fontSize: 11, pointerEvents: 'none',
-        }}>⚠ Windy: {error}</div>
-      )}
-      {missingKey && (
-        <div style={{
-          position: 'absolute', bottom: 80, left: 12, zIndex: 1000,
-          padding: '5px 11px', background: 'rgba(30,30,40,0.82)',
-          color: '#8b949e', borderRadius: 8, fontSize: 11,
-          backdropFilter: 'blur(6px)', pointerEvents: 'none',
-        }}>🔑 Windy disabled — add WINDY_WEBCAMS_API_KEY to .env.local</div>
-      )}
+      {createPortal(badge, overlayEl)}
 
       {populated.map((cam: WindyWebcam) => {
-        const loc = cam.location!;
+        const loc  = cam.location!;
         const { latitude: lat, longitude: lon } = loc;
-        const id = cam.webcamId ?? cam.id ?? `${lat}-${lon}`;
+        const id   = cam.webcamId ?? cam.id ?? `${lat}-${lon}`;
         const title = cam.title ?? 'Windy cam';
-        const preview = cam.images?.current?.preview ?? '';
-        const playerUrl = cam.urls?.player ?? cam.urls?.webcam ?? '';
-        const webcamUrl = cam.urls?.webcam ?? cam.urls?.detail ?? '';
+
+        // API v3 uses `image` (singular); fall back to `images` for safety
+        const camAny = cam as unknown as Record<string, unknown> & {
+          image?: { current?: { preview?: string } };
+        };
+        const preview  = camAny.image?.current?.preview ?? cam.images?.current?.preview ?? '';
+        const playerUrl = cam.urls?.player  ?? cam.urls?.webcam  ?? '';
+        const webcamUrl = cam.urls?.webcam  ?? cam.urls?.detail  ?? '';
 
         return (
           <Marker key={`windy-${id}`} position={[lat!, lon!]} icon={icon}>
@@ -123,15 +162,19 @@ export default function WindyLayer({
                 </div>
 
                 {preview && onExpand && (
-                  <div className="cam-preview-wrap"
+                  <div
+                    className="cam-preview-wrap"
                     style={{ position: 'relative', marginTop: 7, cursor: 'pointer' }}
                     onClick={() => onExpand({ source: 'windy', title, embedUrl: playerUrl || undefined, imageUrl: preview || undefined, linkUrl: webcamUrl, linkLabel: 'Open on Windy' })}
                   >
-                    <img src={preview} alt={title}
+                    <img
+                      src={preview} alt={title}
                       style={{ maxWidth: 248, width: '100%', borderRadius: 6, display: 'block', background: '#0d1117' }}
-                      loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                      loading="lazy"
+                      onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
                     />
-                    <button className="cam-expand-btn"
+                    <button
+                      className="cam-expand-btn"
                       onClick={e => { e.stopPropagation(); onExpand({ source: 'windy', title, embedUrl: playerUrl || undefined, imageUrl: preview || undefined, linkUrl: webcamUrl, linkLabel: 'Open on Windy' }); }}
                       aria-label="Expand to full view"
                       style={{
@@ -144,11 +187,14 @@ export default function WindyLayer({
                     >⛶</button>
                   </div>
                 )}
+
                 {preview && !onExpand && (
                   <div style={{ marginTop: 7 }}>
-                    <img src={preview} alt={title}
+                    <img
+                      src={preview} alt={title}
                       style={{ maxWidth: 248, width: '100%', borderRadius: 6, display: 'block', background: '#0d1117' }}
-                      loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                      loading="lazy"
+                      onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
                     />
                   </div>
                 )}
