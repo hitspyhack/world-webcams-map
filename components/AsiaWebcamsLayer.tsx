@@ -1,0 +1,107 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import L from 'leaflet';
+import { Marker, Popup } from 'react-leaflet';
+
+interface AsiaCam {
+  id: string;
+  title: string;
+  lat: number;
+  lon: number;
+  country?: string;
+  city?: string;
+  imageUrl?: string;
+  sourceUrl?: string;
+  sourceCountry?: string;
+}
+
+export const ASIA_SOURCES: Record<string, { label: string; flag: string; color: string; markerUrl: string }> = {
+  SG: { label: 'Singapore',   flag: '🇸🇬', color: '#ef4444', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png' },
+  JP: { label: 'Japan',       flag: '🇯🇵', color: '#2563eb', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png' },
+  KR: { label: 'Korea',       flag: '🇰🇷', color: '#16a34a', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png' },
+  HK: { label: 'Hong Kong',   flag: '🇭🇰', color: '#f97316', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-orange.png' },
+  TH: { label: 'Thailand',    flag: '🇹🇭', color: '#e11d48', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png' },
+  AE: { label: 'UAE',         flag: '🇦🇪', color: '#0ea5e9', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png' },
+  TW: { label: 'Taiwan',      flag: '🇹🇼', color: '#7c3aed', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-violet.png' },
+  MY: { label: 'Malaysia',    flag: '🇲🇾', color: '#ca8a04', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-gold.png' },
+  ID: { label: 'Indonesia',   flag: '🇮🇩', color: '#dc2626', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png' },
+  VN: { label: 'Vietnam',     flag: '🇻🇳', color: '#15803d', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png' },
+  PH: { label: 'Philippines', flag: '🇵🇭', color: '#1d4ed8', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png' },
+  IN: { label: 'India',       flag: '🇮🇳', color: '#ea580c', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-orange.png' },
+  CN: { label: 'China',       flag: '🇨🇳', color: '#be123c', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png' },
+};
+
+const SHADOW = 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png';
+function makeIcon(url: string) {
+  return new L.Icon({ iconUrl: url, iconRetinaUrl: url.replace('.png', '-2x.png'), shadowUrl: SHADOW, iconSize: [20, 33], iconAnchor: [10, 33], popupAnchor: [1, -28], shadowSize: [33, 33] });
+}
+const ICONS = Object.fromEntries(Object.entries(ASIA_SOURCES).map(([k, v]) => [k, makeIcon(v.markerUrl)])) as Record<string, L.Icon>;
+const DEFAULT_ICON = makeIcon('https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png');
+
+interface Props {
+  visible: Record<string, boolean>;
+  onLoad?: (count: number) => void;
+}
+
+export default function AsiaWebcamsLayer({ visible, onLoad }: Props) {
+  const [cams, setCams] = useState<AsiaCam[]>([]);
+
+  useEffect(() => {
+    Promise.all([
+      fetch('/api/asia-traffic/singapore').then(r => r.json()).catch(() => []),
+      fetch('/api/asia-tourism').then(r => r.json()).catch(() => []),
+    ]).then(([sg, tourism]) => {
+      const sgArr  = Array.isArray(sg)      ? sg      : (sg?.cameras ?? []);
+      const tourArr = Array.isArray(tourism) ? tourism : [];
+      const all = [...sgArr, ...tourArr] as AsiaCam[];
+      setCams(all);
+      onLoad?.(all.length);
+    });
+  }, [onLoad]);
+
+  return (
+    <>
+      {cams.map(cam => {
+        const key  = cam.sourceCountry ?? cam.country ?? 'SG';
+        if (!visible[key]) return null;
+        if (!cam.lat || !cam.lon) return null;
+        const cfg  = ASIA_SOURCES[key];
+        const icon = ICONS[key] ?? DEFAULT_ICON;
+        return (
+          <Marker key={cam.id} position={[cam.lat, cam.lon]} icon={icon}>
+            <Popup maxWidth={270}>
+              <div style={{ fontFamily: 'system-ui, sans-serif' }}>
+                <strong style={{ fontSize: 13 }}>{cam.title}</strong>
+                <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>
+                  {[cam.city, cam.country].filter(Boolean).join(' · ')}
+                </div>
+                {cam.imageUrl && (
+                  <div style={{ marginTop: 6 }}>
+                    <img
+                      src={cam.imageUrl}
+                      alt={cam.title}
+                      style={{ maxWidth: 250, borderRadius: 5, display: 'block' }}
+                      loading="lazy"
+                      onError={e => ((e.target as HTMLImageElement).style.display = 'none')}
+                    />
+                  </div>
+                )}
+                {cam.sourceUrl && (
+                  <div style={{ marginTop: 5 }}>
+                    <a href={cam.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11 }}>Open source ↗</a>
+                  </div>
+                )}
+                {cfg && (
+                  <div style={{ marginTop: 5, fontSize: 10, fontWeight: 700, color: cfg.color }}>
+                    {cfg.flag} {cfg.label.toUpperCase()}
+                  </div>
+                )}
+              </div>
+            </Popup>
+          </Marker>
+        );
+      })}
+    </>
+  );
+}
