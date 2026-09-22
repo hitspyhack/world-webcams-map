@@ -82,6 +82,25 @@ const SOURCE_BADGE_COLORS: Record<string, string> = {
   osm: '#4ade80', deckchair: '#c084fc', eu: '#818cf8', asia: '#fbbf24',
 };
 
+// Flag emoji for EU countries (private to GlobeView — layer files no longer export these)
+const EU_FLAGS: Record<string, string> = {
+  FI: '\ud83c\uddeb\ud83c\uddee', EE: '\ud83c\uddea\ud83c\uddea', GB: '\ud83c\uddec\ud83c\udde7',
+  SE: '\ud83c\uddf8\ud83c\uddea', NO: '\ud83c\uddf3\ud83c\uddf4', PT: '\ud83c\uddf5\ud83c\uddf9',
+  DE: '\ud83c\udde9\ud83c\uddea', FR: '\ud83c\uddeb\ud83c\uddf7', ES: '\ud83c\uddea\ud83c\uddf8',
+  NL: '\ud83c\uddf3\ud83c\uddf1', AT: '\ud83c\udde6\ud83c\uddf9', CH: '\ud83c\udde8\ud83c\udded',
+  IT: '\ud83c\uddee\ud83c\uddf9', DK: '\ud83c\udde9\ud83c\uddf0', BE: '\ud83c\udde7\ud83c\uddea',
+  PL: '\ud83c\uddf5\ud83c\uddf1', EU: '\ud83c\uddea\ud83c\uddfa',
+};
+
+// Flag emoji for Asia countries
+const ASIA_FLAGS: Record<string, string> = {
+  SG: '\ud83c\uddf8\ud83c\uddec', JP: '\ud83c\uddef\ud83c\uddf5', KR: '\ud83c\uddf0\ud83c\uddf7',
+  HK: '\ud83c\udded\ud83c\uddf0', TH: '\ud83c\uddf9\ud83c\udded', AE: '\ud83c\udde6\ud83c\uddea',
+  TW: '\ud83c\uddf9\ud83c\uddfc', MY: '\ud83c\uddf2\ud83c\uddfe', ID: '\ud83c\uddee\ud83c\udde9',
+  VN: '\ud83c\uddfb\ud83c\uddf3', PH: '\ud83c\uddf5\ud83c\udded', IN: '\ud83c\uddee\ud83c\uddf3',
+  CN: '\ud83c\udde8\ud83c\uddf3',
+};
+
 function dotRadius(source: string | undefined, hovered: boolean): number {
   if (hovered) return HOVER_RADIUS;
   if (source === 'eu' || source === 'asia') return 2.2;
@@ -204,7 +223,7 @@ export default function GlobeView({
   const [lightboxEntry, setLightboxEntry] = useState<CamLightboxEntry | null>(null);
   const [drawerCam,     setDrawerCam]     = useState<GlobeCam | null>(null);
 
-  // ── Draw one frame ───────────────────────────────────────────────────────
+  // ── Draw one frame ─────────────────────────────────────────────────────────────────────────────────────
   const draw = useCallback((now: number) => {
     const canvas = canvasRef.current;
     if (!canvas || !readyRef.current) { rafRef.current = requestAnimationFrame(draw); return; }
@@ -242,14 +261,14 @@ export default function GlobeView({
     ctx.save(); ctx.beginPath(); pathGen(d3.geoGraticule()());
     ctx.strokeStyle = 'rgba(30,80,60,0.45)'; ctx.lineWidth = 0.4; ctx.stroke(); ctx.restore();
 
-    // Land — full opacity, vivid green
+    // Land
     if (topoRef.current) {
       ctx.save();
       ctx.beginPath(); pathGen(topoRef.current);
-      ctx.fillStyle   = '#2d7a48'; // full-opacity land fill
-      ctx.strokeStyle = '#52c47a'; // bright border
+      ctx.fillStyle   = '#2d7a48';
+      ctx.strokeStyle = '#52c47a';
       ctx.lineWidth   = 0.7;
-      ctx.globalAlpha = 1;        // explicitly 100%
+      ctx.globalAlpha = 1;
       ctx.fill(); ctx.stroke();
       ctx.restore();
     }
@@ -379,7 +398,7 @@ export default function GlobeView({
     setDrawerCam(cam);
   }, [getCamAt]);
 
-  const handleDrawerExpand  = useCallback((entry: CamLightboxEntry) => { setLightboxEntry(entry); }, []);
+  const handleDrawerExpand    = useCallback((entry: CamLightboxEntry) => { setLightboxEntry(entry); }, []);
   const handleDrawerViewInMap = useCallback((cam: GlobeCam) => {
     setDrawerCam(null);
     if (onCamClick) onCamClick(cam); else onEnterMap();
@@ -511,6 +530,7 @@ export default function GlobeView({
                 }}>{sec.toUpperCase()}</button>
               ))}
             </div>
+
             {legendSection === 'global' && (
               <>
                 {(Object.entries(SOURCE_LABELS) as [SourceKey, string][]).map(([key, label]) => (
@@ -523,26 +543,28 @@ export default function GlobeView({
                 ))}
               </>
             )}
+
             {legendSection === 'eu' && (
               <>
-                {Object.entries(EU_COUNTRIES).map(([key, cfg]) => (
+                {(Object.entries(EU_COUNTRIES) as [string, string][]).map(([key, label]) => (
                   <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', opacity: euVisible[key] ? 1 : 0.35, transition: 'opacity 0.2s' }}>
                     <input type="checkbox" checked={!!euVisible[key]} onChange={() => onToggleEu(key)}
                       style={{ accentColor: '#00dc64', cursor: 'pointer', width: 12, height: 12 }} />
-                    <span style={{ fontSize: 10 }}>{cfg.flag}</span>
-                    <span style={{ flex: 1 }}>{cfg.label}</span>
+                    <span style={{ fontSize: 10 }}>{EU_FLAGS[key] ?? '🇪🇺'}</span>
+                    <span style={{ flex: 1 }}>{label}</span>
                   </label>
                 ))}
               </>
             )}
+
             {legendSection === 'asia' && (
               <>
-                {Object.entries(ASIA_SOURCES).map(([key, cfg]) => (
+                {(Object.entries(ASIA_SOURCES) as [string, string][]).map(([key, label]) => (
                   <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', opacity: asiaVisible[key] ? 1 : 0.35, transition: 'opacity 0.2s' }}>
                     <input type="checkbox" checked={!!asiaVisible[key]} onChange={() => onToggleAsia(key)}
                       style={{ accentColor: '#00dc64', cursor: 'pointer', width: 12, height: 12 }} />
-                    <span style={{ fontSize: 10 }}>{cfg.flag}</span>
-                    <span style={{ flex: 1 }}>{cfg.label}</span>
+                    <span style={{ fontSize: 10 }}>{ASIA_FLAGS[key] ?? '🌏'}</span>
+                    <span style={{ flex: 1 }}>{label}</span>
                   </label>
                 ))}
               </>
@@ -568,7 +590,7 @@ export default function GlobeView({
         position: 'absolute', bottom: 80, left: '50%', transform: 'translateX(-50%)',
         zIndex: 10, fontSize: 10, color: 'rgba(0,180,80,0.4)',
         fontFamily: 'monospace', letterSpacing: '0.1em', pointerEvents: 'none',
-      }}>HOLD & DRAG TO ROTATE · CLICK DOT TO VIEW LIVE FEED</div>
+      }}>HOLD &amp; DRAG TO ROTATE · CLICK DOT TO VIEW LIVE FEED</div>
 
       <div ref={tooltipRef} style={{
         position: 'fixed', zIndex: 20, pointerEvents: 'none',
