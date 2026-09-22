@@ -1,114 +1,117 @@
-'use client';
-
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useMap, useMapEvents } from 'react-leaflet';
 import type { WindyWebcam } from '../types/webcam';
 
-interface UseWindyWebcamsOptions {
-  /** Debounce delay in ms after map stops moving before fetching. Default: 600 */
-  debounceMs?: number;
-  /** Max webcams to request per fetch (free tier recommends ≤ 50). Default: 50 */
-  limit?: number;
-  /** Whether the layer is currently visible (skips fetch when false). Default: true */
+export interface UseWindyWebcamsOptions {
+  /** Set to false to skip all fetches and clear the webcam list. */
   enabled?: boolean;
+  /** Debounce delay in ms after the map stops moving. Default: 600 */
+  debounceMs?: number;
+  /** Max cameras per request (Windy free-tier: ≤ 50). Default: 50 */
+  limit?: number;
 }
 
-interface UseWindyWebcamsResult {
-  webcams: WindyWebcam[];
-  loading: boolean;
-  error: string | null;
+export interface UseWindyWebcamsResult {
+  webcams:    WindyWebcam[];
+  loading:    boolean;
+  /** Non-null only for real API / network errors — NOT for a missing API key. */
+  error:      string | null;
+  /** True when the server indicated no API key is configured. */
+  missingKey: boolean;
 }
 
-function toArray<T>(val: unknown): T[] {
-  return Array.isArray(val) ? (val as T[]) : [];
-}
-
-/**
- * Viewport-aware hook that fetches Windy webcams from the local proxy
- * `/api/windy-webcams` whenever the map viewport changes.
- *
- * Must be used inside a react-leaflet <MapContainer>.
- *
- * @example
- * function WindyLayer({ enabled }: { enabled: boolean }) {
- *   const { webcams, loading, error } = useWindyWebcams({ enabled });
- *   // render <Marker> for each webcam …
- * }
- */
 export function useWindyWebcams({
+  enabled    = true,
   debounceMs = 600,
-  limit = 50,
-  enabled = true,
+  limit      = 50,
 }: UseWindyWebcamsOptions = {}): UseWindyWebcamsResult {
   const map = useMap();
-  const [webcams, setWebcams] = useState<WindyWebcam[]>([]);
-  const [loading, setLoading]  = useState(false);
-  const [error, setError]      = useState<string | null>(null);
 
-  const timerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [webcams,    setWebcams]    = useState<WindyWebcam[]>([]);
+  const [loading,    setLoading]    = useState(false);
+  const [error,      setError]      = useState<string | null>(null);
+  const [missingKey, setMissingKey] = useState(false);
+
   const abortRef   = useRef<AbortController | null>(null);
+  const timerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // If the key is missing we only need to discover that once.
+  const keyMissing = useRef(false);
 
-  const fetchViewport = useCallback(async () => {
-    if (!enabled) return;
+  const fetchCams = useCallback(async () => {
+    if (!enabled || keyMissing.current) return;
 
-    // Cancel any in-flight request
     abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
 
     const bounds = map.getBounds();
-    const bbox = [
-      bounds.getNorth().toFixed(6),
-      bounds.getEast().toFixed(6),
-      bounds.getSouth().toFixed(6),
-      bounds.getWest().toFixed(6),
+    const bbox   = [
+      bounds.getNorth(),
+      bounds.getEast(),
+      bounds.getSouth(),
+      bounds.getWest(),
     ].join(',');
 
     setLoading(true);
     setError(null);
 
     try {
-      const res = await fetch(
+      const res  = await fetch(
         `/api/windy-webcams?bbox=${encodeURIComponent(bbox)}&limit=${limit}`,
-        { signal: controller.signal }
+        { signal: ctrl.signal },
       );
+      const json = await res.json();
 
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j?.error ?? `HTTP ${res.status}`);
+      // Graceful no-key path: server returns 200 + missingKey flag.
+      if (json?.missingKey) {
+        keyMissing.current = true;
+        setMissingKey(true);
+        setWebcams([]);
+        setLoading(false);
+        return;
       }
 
-      const data = await res.json();
-      const list = toArray<WindyWebcam>(data.webcams ?? data.result?.webcams);
+      if (!res.ok) {
+        setError(json?.error ?? `HTTP ${res.status}`);
+        setLoading(false);
+        return;
+      }
+
+      const list: WindyWebcam[] = Array.isArray(json)
+        ? json
+        : Array.isArray(json?.webcams)
+          ? json.webcams
+          : [];
+
       setWebcams(list);
-    } catch (err: unknown) {
-      if ((err as { name?: string }).name === 'AbortError') return; // ignore cancelled
-      setError(err instanceof Error ? err.message : String(err));
+      setError(null);
+    } catch (e: unknown) {
+      if ((e as Error)?.name === 'AbortError') return; // map moved — ignore
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
-  }, [map, enabled, limit]);
+  }, [enabled, limit, map]);
 
-  // Debounce on map move/zoom
-  useMapEvents({
-    moveend: () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(fetchViewport, debounceMs);
-    },
-    zoomend: () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(fetchViewport, debounceMs);
-    },
-  });
+  // Debounced re-fetch on map move/zoom
+  const schedule = useCallback(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(fetchCams, debounceMs);
+  }, [fetchCams, debounceMs]);
 
-  // Initial fetch on mount
+  useMapEvents({ moveend: schedule, zoomend: schedule });
+
+  // Initial fetch on mount / when enabled toggles on
   useEffect(() => {
-    fetchViewport();
-    return () => {
-      abortRef.current?.abort();
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, [fetchViewport]);
+    if (enabled && !keyMissing.current) fetchCams();
+    if (!enabled) { setWebcams([]); setLoading(false); setError(null); }
+  }, [enabled, fetchCams]);
 
-  return { webcams, loading, error };
+  // Cleanup on unmount
+  useEffect(() => () => {
+    abortRef.current?.abort();
+    if (timerRef.current) clearTimeout(timerRef.current);
+  }, []);
+
+  return { webcams, loading, error, missingKey };
 }

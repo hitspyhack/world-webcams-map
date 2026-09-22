@@ -14,89 +14,71 @@ function makeIcon() {
     iconUrl: MARKER_URL,
     iconRetinaUrl: MARKER_URL.replace('.png', '-2x.png'),
     shadowUrl: SHADOW_URL,
-    iconSize: [25, 41],
-    iconAnchor: [12, 41],
-    popupAnchor: [1, -34],
-    shadowSize: [41, 41],
+    iconSize: [25, 41], iconAnchor: [12, 41],
+    popupAnchor: [1, -34], shadowSize: [41, 41],
   });
 }
 
 interface WindyLayerProps {
-  /** When false the layer hides all markers AND skips API fetches. */
   enabled: boolean;
-  /** Callback so parent can show the live count in the legend panel. */
   onCountChange?: (count: number) => void;
-  /** Debounce delay in ms after map stops moving. Default: 600 */
+  /** Also receives missingKey so the parent legend can show a dim hint. */
+  onMissingKey?: () => void;
   debounceMs?: number;
-  /** Max cameras per request (free-tier: ≤ 50). Default: 50 */
   limit?: number;
 }
 
-/**
- * WindyLayer — a self-contained react-leaflet layer that:
- *  1. Uses useWindyWebcams() to fetch Windy cameras for the current viewport.
- *  2. Re-fetches automatically whenever the map moves or zooms (with debounce).
- *  3. Cancels in-flight requests via AbortController when a new viewport fires.
- *
- * Must be rendered inside a <MapContainer>.
- */
 export default function WindyLayer({
   enabled,
   onCountChange,
+  onMissingKey,
   debounceMs = 600,
   limit = 50,
 }: WindyLayerProps) {
   const icon = useMemo(makeIcon, []);
 
-  const { webcams, loading, error } = useWindyWebcams({ enabled, debounceMs, limit });
+  const { webcams, loading, error, missingKey } = useWindyWebcams({ enabled, debounceMs, limit });
 
-  // Notify parent of live count changes
-  // (useEffect would cause an extra render cycle; this inline call is intentional
-  //  because onCountChange should be a stable callback ref in the parent)
+  // Notify parent
   onCountChange?.(webcams.length);
+  if (missingKey) onMissingKey?.();
 
   if (!enabled) return null;
 
   return (
     <>
-      {/* Loading indicator injected into the map */}
+      {/* Loading indicator */}
       {loading && (
-        <div
-          style={{
-            position: 'absolute',
-            bottom: 80,
-            left: 12,
-            zIndex: 1000,
-            padding: '5px 11px',
-            background: 'rgba(11,18,32,0.82)',
-            color: '#fff',
-            borderRadius: 8,
-            fontSize: 11,
-            backdropFilter: 'blur(6px)',
-            pointerEvents: 'none',
-          }}
-        >
+        <div style={{
+          position: 'absolute', bottom: 80, left: 12, zIndex: 1000,
+          padding: '5px 11px', background: 'rgba(11,18,32,0.82)',
+          color: '#fff', borderRadius: 8, fontSize: 11,
+          backdropFilter: 'blur(6px)', pointerEvents: 'none',
+        }}>
           ⟳ Windy: loading…
         </div>
       )}
 
-      {/* Error badge */}
-      {error && !loading && (
-        <div
-          style={{
-            position: 'absolute',
-            bottom: 80,
-            left: 12,
-            zIndex: 1000,
-            padding: '5px 11px',
-            background: 'rgba(161,44,68,0.9)',
-            color: '#fff',
-            borderRadius: 8,
-            fontSize: 11,
-            pointerEvents: 'none',
-          }}
-        >
+      {/* Error badge — only for real API/network errors, NOT missing key */}
+      {error && !loading && !missingKey && (
+        <div style={{
+          position: 'absolute', bottom: 80, left: 12, zIndex: 1000,
+          padding: '5px 11px', background: 'rgba(161,44,68,0.9)',
+          color: '#fff', borderRadius: 8, fontSize: 11, pointerEvents: 'none',
+        }}>
           ⚠ Windy: {error}
+        </div>
+      )}
+
+      {/* Missing-key notice — subtle, non-alarming */}
+      {missingKey && (
+        <div style={{
+          position: 'absolute', bottom: 80, left: 12, zIndex: 1000,
+          padding: '5px 11px', background: 'rgba(30,30,40,0.82)',
+          color: '#8b949e', borderRadius: 8, fontSize: 11,
+          backdropFilter: 'blur(6px)', pointerEvents: 'none',
+        }}>
+          🔑 Windy disabled — add WINDY_WEBCAMS_API_KEY to .env.local
         </div>
       )}
 
@@ -109,49 +91,28 @@ export default function WindyLayer({
         const id = cam.webcamId ?? cam.id ?? `${lat}-${lon}`;
         return (
           <Marker key={`windy-${id}`} position={[lat, lon]} icon={icon}>
-            <Popup maxWidth={260}>
-              <strong>{cam.title ?? 'Windy webcam'}</strong>
-              <br />
-              <span style={{ fontSize: 11, color: '#666' }}>
+            <Popup maxWidth={270}>
+              <strong style={{ fontSize: 13 }}>{cam.title ?? 'Windy webcam'}</strong>
+              <div style={{ fontSize: 11, color: '#8b949e', marginTop: 2 }}>
                 {[loc.city, loc.region, loc.country].filter(Boolean).join(', ')}
-              </span>
+              </div>
               {cam.images?.current?.preview && (
                 <div style={{ marginTop: 6 }}>
                   <img
                     src={cam.images.current.preview}
                     alt={cam.title ?? ''}
-                    style={{ maxWidth: 240, borderRadius: 5 }}
+                    style={{ maxWidth: 248, width: '100%', borderRadius: 6, display: 'block', background: '#0d1117' }}
                     loading="lazy"
-                  />
-                </div>
-              )}
-              {cam.urls?.player && (
-                <div style={{ marginTop: 6 }}>
-                  <iframe
-                    src={cam.urls.player}
-                    title="timelapse"
-                    width="240"
-                    height="135"
-                    loading="lazy"
-                    style={{ border: 0, borderRadius: 5 }}
+                    onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
                   />
                 </div>
               )}
               {cam.urls?.webcam && (
-                <div style={{ marginTop: 4 }}>
-                  <a
-                    href={cam.urls.webcam}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ fontSize: 11 }}
-                  >
-                    Open on Windy ↗
-                  </a>
+                <div style={{ marginTop: 5 }}>
+                  <a href={cam.urls.webcam} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11 }}>Open on Windy ↗</a>
                 </div>
               )}
-              <div style={{ marginTop: 4, fontSize: 10, color: '#3b82f6', fontWeight: 600 }}>
-                SOURCE: WINDY
-              </div>
+              <div style={{ marginTop: 4, fontSize: 10, color: '#60a5fa', fontWeight: 700, letterSpacing: '0.04em' }}>SOURCE: WINDY</div>
             </Popup>
           </Marker>
         );
