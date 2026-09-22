@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import L from 'leaflet';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import L, { Map as LeafletMap } from 'leaflet';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 
 // ---- Types ----
@@ -38,7 +38,6 @@ interface SkylineItem {
   country?: string;
 }
 
-/** Always return a safe array regardless of what the API gives back */
 function toArray<T>(val: unknown): T[] {
   return Array.isArray(val) ? (val as T[]) : [];
 }
@@ -50,6 +49,7 @@ export default function LeafletMap() {
   const [skylineCams, setSkylineCams] = useState<SkylineItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const mapRef = useRef<LeafletMap | null>(null);
 
   const windyIcon = useMemo(
     () =>
@@ -78,6 +78,16 @@ export default function LeafletMap() {
       }),
     []
   );
+
+  // Cleanup map instance on unmount (fixes Strict Mode double-mount)
+  useEffect(() => {
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const fetchAll = async () => {
@@ -129,6 +139,7 @@ export default function LeafletMap() {
         zoom={2}
         scrollWheelZoom
         style={{ height: '100%', width: '100%' }}
+        ref={mapRef}
       >
         <TileLayer
           attribution="&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> contributors"
