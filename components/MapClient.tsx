@@ -63,7 +63,7 @@ interface AsiaCam {
   country?: string; city?: string; sourceCountry?: string;
 }
 
-// ─── Country centroids (ISO-3166-1 alpha-2) ─────────────────────────────────
+// ─── Country centroids (ISO-3166-1 alpha-2) ────────────────────────────────────────────
 const COUNTRY_CENTROIDS: Record<string, { name: string; lat: number; lon: number }> = {
   AD:{name:'Andorra',lat:42.55,lon:1.60},AE:{name:'United Arab Emirates',lat:23.42,lon:53.85},
   AF:{name:'Afghanistan',lat:33.93,lon:67.71},AG:{name:'Antigua and Barbuda',lat:17.06,lon:-61.80},
@@ -244,7 +244,7 @@ export default function MapClient() {
 
   const [flyTo, setFlyTo] = useState<FlyToTarget | null>(null);
 
-  // ─── Country filter ──────────────────────────────────────────────────────
+  // ─── Country filter ─────────────────────────────────────────────────────────────────────
   const [countryFilter, setCountryFilter] = useState<CountryEntry | null>(null);
 
   const windyMapCountRef = useRef(windyMapCount);
@@ -326,7 +326,7 @@ export default function MapClient() {
     fetchAll();
   }, []);
 
-  // ─── Build country list from all loaded cam data ─────────────────────────
+  // ─── Build country list from all loaded cam data ──────────────────────────────────────
   const countryList: CountryEntry[] = useMemo(() => {
     const counts: Record<string, { name: string; lat: number; lon: number; count: number }> = {};
     const addCode = (raw?: string) => {
@@ -350,7 +350,7 @@ export default function MapClient() {
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
   }, [skylineCams, earthCams, osmCams, deckCams, euCams, asiaCams, windyGlobeCams]);
 
-  // ─── Country select: on globe → rotate to it; on map → fly to it ─────────
+  // ─── Country select: on globe → rotate to it; on map → fly to it ─────────────────
   const handleCountrySelect = useCallback((entry: CountryEntry | null) => {
     setCountryFilter(entry);
     if (entry) {
@@ -361,7 +361,7 @@ export default function MapClient() {
     }
   }, [mode]);
 
-  // ─── Filter cam arrays when a country is active ──────────────────────────
+  // ─── Filter cam arrays when a country is active ─────────────────────────────────
   const matchCountry = useCallback((raw?: string) => {
     if (!countryFilter) return true;
     if (!raw) return false;
@@ -487,6 +487,10 @@ export default function MapClient() {
           onCamClick={handleGlobeCamClick}
           countryFilter={countryFilter}
           onClearFilter={() => handleCountrySelect(null)}
+          {/* Pass the live country list and callback so GlobeView renders its
+              own inline CountrySearch dropdown in globe mode */}
+          countries={countryList}
+          onSearchSelect={handleCountrySelect}
         />
       </div>
 
@@ -545,12 +549,17 @@ export default function MapClient() {
         {mode === 'globe' ? '🗺 MAP' : '🌐 GLOBE'}
       </button>
 
-      {/* Country search — visible in BOTH globe and map modes */}
-      <CountrySearch
-        countries={countryList}
-        selected={countryFilter}
-        onSelect={handleCountrySelect}
-      />
+      {/* Country search — visible in map mode only.
+          In globe mode, GlobeView renders its own internal CountrySearch
+          (shifted right of the 🗺/🌐 toggle button) via the countries prop.
+          Rendering both simultaneously would cause duplicate dropdowns. */}
+      {mode === 'map' && (
+        <CountrySearch
+          countries={countryList}
+          selected={countryFilter}
+          onSelect={handleCountrySelect}
+        />
+      )}
     </div>
   );
 }
