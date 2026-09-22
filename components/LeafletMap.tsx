@@ -1,19 +1,17 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import AsiaWebcamsLayer, { ASIA_SOURCES } from './AsiaWebcamsLayer';
 import EUTrafficLayer,   { EU_COUNTRIES }  from './EUTrafficLayer';
-
-// ---- Types ----
-interface WindyLocation { latitude: number; longitude: number; country?: string; region?: string; city?: string; }
-interface WindyWebcam   { webcamId?: string; id?: string; title?: string; location?: WindyLocation; images?: { current?: { preview?: string } }; urls?: { player?: string; webcam?: string }; }
-interface SkylineGps    { lat: number; lon: number; }
-interface SkylineItem   { id?: string; title?: string; url?: string; snapshotUrl?: string; gps?: SkylineGps; town?: string; country?: string; }
-interface EarthCamItem  { id: string; title: string; lat: number; lon: number; country: string; city: string; embedUrl: string; imageUrl: string; }
-interface OsmWebcam     { id: string; title: string; lat: number; lon: number; country?: string; city?: string; webcamUrl: string; operator?: string; }
-interface DeckchairWebcam { id: string; title: string; lat: number; lon: number; thumbnailUrl: string; embedUrl: string; }
+import WindyLayer from './WindyLayer';
+import type {
+  SkylineItem,
+  EarthCamItem,
+  OsmWebcam,
+  DeckchairWebcam,
+} from '../types/webcam';
 
 function toArray<T>(val: unknown): T[] { return Array.isArray(val) ? (val as T[]) : []; }
 
@@ -33,7 +31,17 @@ function makeIcon(url: string) {
 
 // ---- Component ----
 export default function LeafletMap() {
-  const [windyCams,   setWindyCams]   = useState<WindyWebcam[]>([]);
+  // ── Windy count is now driven by <WindyLayer> via callback ──
+  const [windyCount,  setWindyCount]  = useState(0);
+  const windyCountRef = useRef(windyCount);
+  // Stable callback so WindyLayer doesn't re-render on every parent re-render
+  const handleWindyCount = useCallback((n: number) => {
+    if (n !== windyCountRef.current) {
+      windyCountRef.current = n;
+      setWindyCount(n);
+    }
+  }, []);
+
   const [skylineCams, setSkylineCams] = useState<SkylineItem[]>([]);
   const [earthCams,   setEarthCams]   = useState<EarthCamItem[]>([]);
   const [osmCams,     setOsmCams]     = useState<OsmWebcam[]>([]);
@@ -61,6 +69,7 @@ export default function LeafletMap() {
     return r;
   }, []);
 
+  // ── Fetch all non-Windy sources once on mount ──
   useEffect(() => {
     const fetchAll = async () => {
       setLoading(true); setErrors([]);
@@ -69,12 +78,6 @@ export default function LeafletMap() {
         try { await fn(); } catch (e: unknown) { errs.push(`${label}: ${e instanceof Error ? e.message : String(e)}`); }
       };
       await Promise.all([
-        safe('Windy', async () => {
-          const r = await fetch('/api/windy-webcams?bbox=90,180,-90,-180');
-          const j = await r.json();
-          if (!r.ok) errs.push(`Windy: ${j?.error ?? r.statusText}`);
-          else setWindyCams(toArray(j.webcams ?? j.result?.webcams));
-        }),
         safe('Skyline', async () => {
           const r = await fetch('/api/skyline-webcams', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'Rome' }) });
           const j = await r.json();
@@ -105,7 +108,7 @@ export default function LeafletMap() {
     fetchAll();
   }, []);
 
-  const globalTotal = windyCams.length + skylineCams.length + earthCams.length + osmCams.length + deckCams.length;
+  const globalTotal = windyCount + skylineCams.length + earthCams.length + osmCams.length + deckCams.length;
   const grandTotal  = globalTotal + asiaCount + euCount;
 
   const sectionBtn = (key: 'global'|'eu'|'asia', label: string) => (
@@ -132,24 +135,15 @@ export default function LeafletMap() {
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
 
-        {/* ── Global webcam sources ── */}
-        {visible.windy && windyCams.map(cam => {
-          const loc = cam.location; if (!loc) return null;
-          const { latitude: lat, longitude: lon } = loc; if (lat == null || lon == null) return null;
-          const id = cam.webcamId ?? cam.id ?? `${lat}-${lon}`;
-          return (
-            <Marker key={`windy-${id}`} position={[lat, lon]} icon={icons.windy}>
-              <Popup maxWidth={260}>
-                <strong>{cam.title ?? 'Windy webcam'}</strong><br />
-                <span style={{ fontSize: 11, color: '#666' }}>{[loc.city, loc.region, loc.country].filter(Boolean).join(', ')}</span>
-                {cam.images?.current?.preview && <div style={{ marginTop: 6 }}><img src={cam.images.current.preview} alt={cam.title ?? ''} style={{ maxWidth: 240, borderRadius: 5 }} loading="lazy" /></div>}
-                {cam.urls?.player && <div style={{ marginTop: 6 }}><iframe src={cam.urls.player} title="timelapse" width="240" height="135" loading="lazy" style={{ border: 0, borderRadius: 5 }} /></div>}
-                {cam.urls?.webcam && <div style={{ marginTop: 4 }}><a href={cam.urls.webcam} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11 }}>Open on Windy ↗</a></div>}
-                <div style={{ marginTop: 4, fontSize: 10, color: '#3b82f6', fontWeight: 600 }}>SOURCE: WINDY</div>
-              </Popup>
-            </Marker>
-          );
-        })}
+        {/* ── Windy — viewport-aware, re-fetches on pan/zoom ── */}
+        <WindyLayer
+          enabled={visible.windy}
+          onCountChange={handleWindyCount}
+          debounceMs={600}
+          limit={50}
+        />
+
+        {/* ── Skyline ── */}
         {visible.skyline && skylineCams.map(cam => {
           const gps = cam.gps; if (!gps) return null;
           const { lat, lon } = gps; if (lat == null || lon == null) return null;
@@ -165,6 +159,8 @@ export default function LeafletMap() {
             </Marker>
           );
         })}
+
+        {/* ── EarthCam ── */}
         {visible.earthcam && earthCams.map(cam => (
           <Marker key={cam.id} position={[cam.lat, cam.lon]} icon={icons.earthcam}>
             <Popup maxWidth={260}>
@@ -176,6 +172,8 @@ export default function LeafletMap() {
             </Popup>
           </Marker>
         ))}
+
+        {/* ── OSM / Overpass ── */}
         {visible.osm && osmCams.map(cam => (
           <Marker key={cam.id} position={[cam.lat, cam.lon]} icon={icons.osm}>
             <Popup maxWidth={260}>
@@ -187,6 +185,8 @@ export default function LeafletMap() {
             </Popup>
           </Marker>
         ))}
+
+        {/* ── Deckchair ── */}
         {visible.deckchair && deckCams.map(cam => (
           <Marker key={cam.id} position={[cam.lat, cam.lon]} icon={icons.deckchair}>
             <Popup maxWidth={260}>
@@ -199,7 +199,7 @@ export default function LeafletMap() {
         ))}
 
         {/* ── EU Traffic Layer ── */}
-        <EUTrafficLayer visible={euVisible} />
+        <EUTrafficLayer visible={euVisible} onLoad={setEuCount} />
 
         {/* ── Asia Layer ── */}
         <AsiaWebcamsLayer visible={asiaVisible} onLoad={setAsiaCount} />
@@ -215,7 +215,7 @@ export default function LeafletMap() {
         {openSection === 'global' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 4 }}>
             {(Object.entries(SOURCE_CONFIG) as [SourceKey, typeof SOURCE_CONFIG[SourceKey]][]).map(([key, cfg]) => {
-              const count = key === 'windy' ? windyCams.length : key === 'skyline' ? skylineCams.length : key === 'earthcam' ? earthCams.length : key === 'osm' ? osmCams.length : deckCams.length;
+              const count = key === 'windy' ? windyCount : key === 'skyline' ? skylineCams.length : key === 'earthcam' ? earthCams.length : key === 'osm' ? osmCams.length : deckCams.length;
               return toggle(key, visible as Record<string,boolean>, setVisible as React.Dispatch<React.SetStateAction<Record<string,boolean>>>, cfg.color, cfg.markerUrl, cfg.label, count);
             })}
           </div>
@@ -242,10 +242,10 @@ export default function LeafletMap() {
         )}
       </div>
 
-      {/* Loading indicator */}
+      {/* Loading indicator for non-Windy sources */}
       {loading && (
         <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 1000, padding: '8px 14px', background: 'rgba(11,18,32,0.88)', color: '#fff', borderRadius: 8, fontSize: 13, backdropFilter: 'blur(6px)' }}>
-          Loading all webcam sources…
+          Loading webcam sources…
         </div>
       )}
 
