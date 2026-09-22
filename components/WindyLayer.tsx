@@ -1,7 +1,7 @@
 'use client';
 
 import L from 'leaflet';
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Marker, Popup } from 'react-leaflet';
 import { useWindyWebcams } from '../hooks/useWindyWebcams';
 import type { WindyWebcam } from '../types/webcam';
@@ -54,9 +54,20 @@ export default function WindyLayer({
   const { webcams, loading, error, missingKey } = useWindyWebcams({ enabled, debounceMs, limit });
 
   const populated = webcams.filter(isPopulated);
+  const populatedCount = populated.length;
 
-  onCountChange?.(populated.length);
-  if (missingKey) onMissingKey?.();
+  // ── Notify parent AFTER render (never during) ──────────────────────────
+  // Calling setState on a parent component from inside the render body of a
+  // child violates React's rule against side-effects during render and emits:
+  //   "Cannot update a component (MapClient) while rendering WindyLayer"
+  // Moving the calls into useEffect defers them until after the commit phase.
+  useEffect(() => {
+    onCountChange?.(populatedCount);
+  }, [populatedCount, onCountChange]);
+
+  useEffect(() => {
+    if (missingKey) onMissingKey?.();
+  }, [missingKey, onMissingKey]);
 
   if (!enabled) return null;
 
