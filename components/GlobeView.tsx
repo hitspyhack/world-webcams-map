@@ -88,6 +88,7 @@ export default function GlobeView({
   const rafRef       = useRef<number>(0);
   const rotRef       = useRef<[number, number, number]>([0, TILT, 0]);
   const dragRef      = useRef<{ active: boolean; x: number; y: number }>({ active: false, x: 0, y: 0 });
+  // pauseRef is ONLY true while the pointer/touch is physically held down
   const pauseRef     = useRef(false);
   const lastFrameRef = useRef(0);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -114,6 +115,7 @@ export default function GlobeView({
     const cx = W / 2, cy = H / 2;
     const radius = Math.min(W, H) * 0.42;
 
+    // Spin whenever the pointer is NOT physically held down (drag counts as held)
     if (!pauseRef.current && !dragRef.current.active)
       rotRef.current = [rotRef.current[0] + SPIN_SPEED, TILT, 0];
 
@@ -229,7 +231,11 @@ export default function GlobeView({
     return best;
   }, [cams]);
 
-  // Mouse handlers
+  // ── Mouse handlers ───────────────────────────────────────────────────────
+  // NOTE: onMouseEnter is intentionally removed — hovering no longer pauses
+  // the spin. The globe rotates continuously unless the user is actively
+  // holding the mouse button down (drag) or touching (touch).
+
   const onMouseMove = useCallback((e: React.MouseEvent) => {
     if (dragRef.current.active) {
       const dx = e.clientX - dragRef.current.x, dy = e.clientY - dragRef.current.y;
@@ -258,24 +264,23 @@ export default function GlobeView({
   }, [getCamAt]);
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
+    // Pause spin and start drag only while the button is physically held
     pauseRef.current = true;
     dragRef.current = { active: true, x: e.clientX, y: e.clientY };
   }, []);
 
   const onMouseUp = useCallback(() => {
     dragRef.current.active = false;
-    setTimeout(() => { pauseRef.current = false; }, 600);
+    // Resume spin immediately when the button is released
+    pauseRef.current = false;
   }, []);
 
   const onMouseLeave = useCallback(() => {
+    // Release drag state if pointer leaves canvas; spin continues/resumes
     dragRef.current.active = false;
     pauseRef.current = false;
     hoveredRef.current = null;
     if (tooltipRef.current) tooltipRef.current.style.opacity = '0';
-  }, []);
-
-  const onMouseEnter = useCallback(() => {
-    pauseRef.current = true;
   }, []);
 
   const onClick = useCallback((e: React.MouseEvent) => {
@@ -319,7 +324,7 @@ export default function GlobeView({
         ref={canvasRef}
         style={{ display: 'block', width: '100%', height: '100%', cursor: 'grab' }}
         onMouseMove={onMouseMove} onMouseDown={onMouseDown} onMouseUp={onMouseUp}
-        onMouseLeave={onMouseLeave} onMouseEnter={onMouseEnter} onClick={onClick}
+        onMouseLeave={onMouseLeave} onClick={onClick}
         onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
       />
 
@@ -452,7 +457,7 @@ export default function GlobeView({
         zIndex: 10, fontSize: 10, color: 'rgba(0,180,80,0.4)',
         fontFamily: 'monospace', letterSpacing: '0.1em', pointerEvents: 'none',
       }}>
-        DRAG TO ROTATE · CLICK DOT TO FLY TO IN MAP
+        HOLD & DRAG TO ROTATE · CLICK DOT TO FLY TO IN MAP
       </div>
 
       {/* Cam tooltip */}
