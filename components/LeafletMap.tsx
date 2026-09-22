@@ -95,7 +95,7 @@ function FlyToController({ target, onDone }: { target: FlyToTarget | null; onDon
   return null;
 }
 
-// ── Props ────────────────────────────────────────────────────────────────────
+// ── Props ────────────────────────────────────────────────────────────────────────────
 interface LeafletMapProps {
   skylineCams:   SkylineItem[];
   earthCams:     EarthCamItem[];
@@ -210,20 +210,19 @@ export default function LeafletMap({
         {/* Windy — live viewport fetch */}
         <WindyLayer enabled={visible.windy} onCountChange={handleWindyCount} />
 
-        {/* Skyline */}
+        {/* Skyline — SkylineItem uses flat lat/lon */}
         {visible.skyline && skylineCams.map(cam => {
-          const lat = cam.location?.lat, lon = cam.location?.lng;
-          if (!lat || !lon) return null;
+          if (!cam.lat || !cam.lon) return null;
           const title = cam.title ?? 'Skyline cam';
-          const img   = cam.images?.current?.preview ?? cam.images?.current?.full ?? '';
+          const img   = cam.snapshotUrl ?? '';
           return (
-            <Marker key={cam.id ?? `sky-${lat}-${lon}`} position={[lat, lon]} icon={icons.skyline}>
+            <Marker key={cam.id ?? `sky-${cam.lat}-${cam.lon}`} position={[cam.lat, cam.lon]} icon={icons.skyline}>
               <Popup maxWidth={270}>
                 <div style={{ fontFamily: 'system-ui' }}>
                   <strong style={{ fontSize: 13 }}>{title}</strong>
-                  {cam.location?.city && <div style={{ fontSize: 11, color: '#8b949e', marginTop: 2 }}>{cam.location.city}{cam.location.country ? ` · ${cam.location.country}` : ''}</div>}
+                  {cam.city && <div style={{ fontSize: 11, color: '#8b949e', marginTop: 2 }}>{cam.city}{cam.country ? ` · ${cam.country}` : ''}</div>}
                   <PreviewImg src={img} alt={title} />
-                  <PopupLink href={cam.url ?? ''} label="Open on Windy" />
+                  <PopupLink href={cam.url ?? ''} label="Open on Skyline" />
                   <SourceBadge label="SKYLINE" color={SOURCE_CONFIG.skyline.color} />
                 </div>
               </Popup>
@@ -250,7 +249,7 @@ export default function LeafletMap({
           );
         })}
 
-        {/* OSM */}
+        {/* OSM — OsmWebcam uses webcamUrl, not url */}
         {visible.osm && osmCams.map((cam) => {
           if (!cam.lat || !cam.lon) return null;
           const title = cam.title ?? cam.name ?? 'OSM webcam';
@@ -259,7 +258,8 @@ export default function LeafletMap({
               <Popup maxWidth={270}>
                 <div style={{ fontFamily: 'system-ui' }}>
                   <strong style={{ fontSize: 13 }}>{title}</strong>
-                  <PopupLink href={cam.url ?? ''} label="Open webcam" />
+                  {cam.city && <div style={{ fontSize: 11, color: '#8b949e', marginTop: 2 }}>{cam.city}{cam.country ? ` · ${cam.country}` : ''}</div>}
+                  <PopupLink href={cam.webcamUrl ?? ''} label="Open webcam" />
                   <SourceBadge label="OSM" color={SOURCE_CONFIG.osm.color} />
                 </div>
               </Popup>
@@ -276,7 +276,6 @@ export default function LeafletMap({
               <Popup maxWidth={270}>
                 <div style={{ fontFamily: 'system-ui' }}>
                   <strong style={{ fontSize: 13 }}>{title}</strong>
-                  {cam.city && <div style={{ fontSize: 11, color: '#8b949e', marginTop: 2 }}>{cam.city}{cam.country ? ` · ${cam.country}` : ''}</div>}
                   <PreviewImg src={cam.thumbnailUrl ?? ''} alt={title} />
                   <PopupLink href={cam.embedUrl ?? ''} label="View stream" />
                   <SourceBadge label="DECKCHAIR" color={SOURCE_CONFIG.deckchair.color} />

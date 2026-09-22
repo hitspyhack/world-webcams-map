@@ -10,6 +10,7 @@ import type {
   EarthCamItem,
   OsmWebcam,
   DeckchairWebcam,
+  WindyWebcam,
 } from '../types/webcam';
 
 const GlobeView = dynamic(() => import('./GlobeView'), {
@@ -97,14 +98,17 @@ export default function MapClient() {
   );
 
   // ─── Shared cam data (fetched once, used by both views) ─────────────────
-  const [skylineCams, setSkylineCams] = useState<SkylineItem[]>([]);
-  const [earthCams,   setEarthCams]   = useState<EarthCamItem[]>([]);
-  const [osmCams,     setOsmCams]     = useState<OsmWebcam[]>([]);
-  const [deckCams,    setDeckCams]    = useState<DeckchairWebcam[]>([]);
-  const [euCams,      setEuCams]      = useState<TrafficCam[]>([]);
-  const [asiaCams,    setAsiaCams]    = useState<AsiaCam[]>([]);
-  const [loading,     setLoading]     = useState(false);
-  const [errors,      setErrors]      = useState<string[]>([]);
+  const [skylineCams,    setSkylineCams]    = useState<SkylineItem[]>([]);
+  const [earthCams,      setEarthCams]      = useState<EarthCamItem[]>([]);
+  const [osmCams,        setOsmCams]        = useState<OsmWebcam[]>([]);
+  const [deckCams,       setDeckCams]       = useState<DeckchairWebcam[]>([]);
+  const [euCams,         setEuCams]         = useState<TrafficCam[]>([]);
+  const [asiaCams,       setAsiaCams]       = useState<AsiaCam[]>([]);
+  // Windy: globe uses a one-shot world-bbox snapshot; the 2D map uses the
+  // live viewport hook inside WindyLayer. These are independent.
+  const [windyGlobeCams, setWindyGlobeCams] = useState<WindyWebcam[]>([]);
+  const [loading,        setLoading]        = useState(false);
+  const [errors,         setErrors]         = useState<string[]>([]);
 
   // live windy count from the 2D map viewport layer (may differ from globe)
   const [windyMapCount, setWindyMapCount] = useState(0);
@@ -174,8 +178,25 @@ export default function MapClient() {
           );
           setAsiaCams(all);
         }),
-        // Windy cameras are now fetched live per viewport by WindyLayer via
-        // useWindyWebcams — no global one-shot fetch needed here.
+        // Windy globe snapshot — world-bbox, best-effort, errors swallowed.
+        // The live per-viewport data for the 2D map is handled separately by
+        // WindyLayer → useWindyWebcams inside the MapContainer.
+        safe('WindyGlobe', async () => {
+          const bbox = encodeURIComponent('90,180,-90,-180');
+          const r = await fetch(`/api/windy-webcams?bbox=${bbox}&limit=50`);
+          const j = await r.json();
+          if (j?.missingKey || !r.ok) return; // no key configured — globe dots stay empty
+          const list: WindyWebcam[] = Array.isArray(j) ? j
+            : Array.isArray(j?.webcams) ? j.webcams : [];
+          setWindyGlobeCams(
+            list.filter(c =>
+              c.location?.latitude != null &&
+              c.location?.longitude != null &&
+              isFinite(c.location.latitude) &&
+              isFinite(c.location.longitude)
+            )
+          );
+        }),
       ]);
       setErrors(errs); setLoading(false);
     };
@@ -186,13 +207,18 @@ export default function MapClient() {
   const globeCams: GlobeCam[] = useMemo(() => {
     const cams: GlobeCam[] = [];
 
-    // Windy dots are not pre-fetched globally; the globe shows them via
-    // SEED_CAMS fallback until the user switches to the map view.
+    // Windy — globe snapshot (separate from the live viewport hook)
+    if (visible.windy)
+      for (const c of windyGlobeCams) {
+        const lat = c.location!.latitude, lon = c.location!.longitude;
+        cams.push({ lat, lon, title: c.title ?? 'Windy', color: SOURCE_COLORS.windy, source: 'windy' });
+      }
 
+    // Skyline — SkylineItem has flat lat/lon fields (not location.lat/lng)
     if (visible.skyline)
       for (const c of skylineCams)
-        if (c.location?.lat && c.location?.lng)
-          cams.push({ lat: c.location.lat, lon: c.location.lng, title: c.title ?? 'Skyline', color: SOURCE_COLORS.skyline, source: 'skyline' });
+        if (c.lat && c.lon)
+          cams.push({ lat: c.lat, lon: c.lon, title: c.title ?? 'Skyline', color: SOURCE_COLORS.skyline, source: 'skyline' });
 
     if (visible.earthcam)
       for (const c of earthCams)
@@ -226,9 +252,11 @@ export default function MapClient() {
 
     // Fall back to seed cams while data is loading so globe looks populated
     return cams.length > 0 ? cams : SEED_CAMS.filter(c => visible[c.source as SourceKey] !== false);
-  }, [skylineCams, earthCams, osmCams, deckCams, euCams, asiaCams, visible, euVisible, asiaVisible]);
+  }, [windyGlobeCams, skylineCams, earthCams, osmCams, deckCams, euCams, asiaCams, visible, euVisible, asiaVisible]);
 
-  // When a globe dot is clicked: store fly-to target and switch to map
+  // When a globe dot is clicked: store fly-to target and switch to map.
+  // Works for all sources (windy/skyline/earthcam/osm/deckchair/eu/asia)
+  // because GlobeCam always carries lat/lon regardless of source.
   const handleGlobeCamClick = useCallback((cam: GlobeCam) => {
     setFlyTo({ lat: cam.lat, lon: cam.lon, zoom: 13 });
     setMode('map');
