@@ -196,11 +196,9 @@ function camCountry(c: {country?:string;sourceCountry?:string}) {
   return c.sourceCountry ?? c.country ?? '';
 }
 
-// Build a lightbox-ready GlobeCam from a Windy webcam object
 function windyToGlobeCam(c: WindyWebcam): GlobeCam {
   const lat = c.location!.latitude;
   const lon = c.location!.longitude;
-  // Windy player embed: https://webcams.windy.com/webcams/{id}/player
   const id = c.id ?? (c as unknown as Record<string,unknown>).webcamId;
   const embedUrl = id ? `https://webcams.windy.com/webcams/${id}/player` : undefined;
   const imageUrl = c.image?.current?.preview ?? c.image?.sizes?.large?.url;
@@ -243,8 +241,6 @@ export default function MapClient() {
   const [euCount,       setEuCount]       = useState(0);
 
   const [flyTo, setFlyTo] = useState<FlyToTarget | null>(null);
-
-  // ─── Country filter ─────────────────────────────────────────────────────────────────────
   const [countryFilter, setCountryFilter] = useState<CountryEntry | null>(null);
 
   const windyMapCountRef = useRef(windyMapCount);
@@ -326,7 +322,6 @@ export default function MapClient() {
     fetchAll();
   }, []);
 
-  // ─── Build country list from all loaded cam data ──────────────────────────────────────
   const countryList: CountryEntry[] = useMemo(() => {
     const counts: Record<string, { name: string; lat: number; lon: number; count: number }> = {};
     const addCode = (raw?: string) => {
@@ -350,18 +345,13 @@ export default function MapClient() {
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
   }, [skylineCams, earthCams, osmCams, deckCams, euCams, asiaCams, windyGlobeCams]);
 
-  // ─── Country select: on globe → rotate to it; on map → fly to it ─────────────────
   const handleCountrySelect = useCallback((entry: CountryEntry | null) => {
     setCountryFilter(entry);
-    if (entry) {
-      if (mode === 'map') {
-        setFlyTo({ lat: entry.lat, lon: entry.lon, zoom: 6 });
-      }
-      // On globe: GlobeView watches countryFilter and calls rotateTo internally
+    if (entry && mode === 'map') {
+      setFlyTo({ lat: entry.lat, lon: entry.lon, zoom: 6 });
     }
   }, [mode]);
 
-  // ─── Filter cam arrays when a country is active ─────────────────────────────────
   const matchCountry = useCallback((raw?: string) => {
     if (!countryFilter) return true;
     if (!raw) return false;
@@ -449,14 +439,11 @@ export default function MapClient() {
     return cams.length > 0 ? cams : SEED_CAMS.filter(c => visible[c.source as SourceKey] !== false);
   }, [windyGlobeCams, filteredSkyline, filteredEarth, filteredOsm, filteredDeck, filteredEu, filteredAsia, visible, euVisible, asiaVisible, countryFilter, matchCountry]);
 
-  // Globe cam click: open lightbox (handled inside GlobeView) or fly to map
   const handleGlobeCamClick = useCallback((cam: GlobeCam) => {
-    // If no embeddable content, switch to map and fly to cam location
     if (!cam.embedUrl && !cam.imageUrl) {
       setFlyTo({ lat: cam.lat, lon: cam.lon, zoom: 13 });
       setMode('map');
     }
-    // Otherwise GlobeView opens its own lightbox — nothing to do here
   }, []);
 
   const grandTotal = windyMapCount + filteredSkyline.length + filteredEarth.length + filteredOsm.length + filteredDeck.length + asiaCount + euCount;
@@ -487,8 +474,6 @@ export default function MapClient() {
           onCamClick={handleGlobeCamClick}
           countryFilter={countryFilter}
           onClearFilter={() => handleCountrySelect(null)}
-          {/* Pass the live country list and callback so GlobeView renders its
-              own inline CountrySearch dropdown in globe mode */}
           countries={countryList}
           onSearchSelect={handleCountrySelect}
         />
@@ -549,10 +534,7 @@ export default function MapClient() {
         {mode === 'globe' ? '🗺 MAP' : '🌐 GLOBE'}
       </button>
 
-      {/* Country search — visible in map mode only.
-          In globe mode, GlobeView renders its own internal CountrySearch
-          (shifted right of the 🗺/🌐 toggle button) via the countries prop.
-          Rendering both simultaneously would cause duplicate dropdowns. */}
+      {/* Country search — map mode only; globe mode uses GlobeView’s internal search */}
       {mode === 'map' && (
         <CountrySearch
           countries={countryList}
