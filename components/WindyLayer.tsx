@@ -19,10 +19,24 @@ function makeIcon() {
   });
 }
 
+/** A Windy cam is considered populated when it has valid coords + a title
+ *  + at least one usable media URL (preview image OR webcam link). */
+function isPopulated(cam: WindyWebcam): boolean {
+  const loc = cam.location;
+  if (!loc) return false;
+  const { latitude: lat, longitude: lon } = loc;
+  if (lat == null || lon == null || !isFinite(lat) || !isFinite(lon)) return false;
+  if (!cam.title?.trim()) return false;
+  const hasMedia =
+    !!cam.images?.current?.preview ||
+    !!cam.urls?.webcam ||
+    !!cam.urls?.detail;
+  return hasMedia;
+}
+
 interface WindyLayerProps {
   enabled: boolean;
   onCountChange?: (count: number) => void;
-  /** Also receives missingKey so the parent legend can show a dim hint. */
   onMissingKey?: () => void;
   debounceMs?: number;
   limit?: number;
@@ -39,15 +53,15 @@ export default function WindyLayer({
 
   const { webcams, loading, error, missingKey } = useWindyWebcams({ enabled, debounceMs, limit });
 
-  // Notify parent
-  onCountChange?.(webcams.length);
+  const populated = webcams.filter(isPopulated);
+
+  onCountChange?.(populated.length);
   if (missingKey) onMissingKey?.();
 
   if (!enabled) return null;
 
   return (
     <>
-      {/* Loading indicator */}
       {loading && (
         <div style={{
           position: 'absolute', bottom: 80, left: 12, zIndex: 1000,
@@ -59,7 +73,6 @@ export default function WindyLayer({
         </div>
       )}
 
-      {/* Error badge — only for real API/network errors, NOT missing key */}
       {error && !loading && !missingKey && (
         <div style={{
           position: 'absolute', bottom: 80, left: 12, zIndex: 1000,
@@ -70,7 +83,6 @@ export default function WindyLayer({
         </div>
       )}
 
-      {/* Missing-key notice — subtle, non-alarming */}
       {missingKey && (
         <div style={{
           position: 'absolute', bottom: 80, left: 12, zIndex: 1000,
@@ -82,17 +94,14 @@ export default function WindyLayer({
         </div>
       )}
 
-      {/* Markers */}
-      {webcams.map((cam: WindyWebcam) => {
-        const loc = cam.location;
-        if (!loc) return null;
+      {populated.map((cam: WindyWebcam) => {
+        const loc = cam.location!;
         const { latitude: lat, longitude: lon } = loc;
-        if (lat == null || lon == null) return null;
         const id = cam.webcamId ?? cam.id ?? `${lat}-${lon}`;
         return (
-          <Marker key={`windy-${id}`} position={[lat, lon]} icon={icon}>
+          <Marker key={`windy-${id}`} position={[lat!, lon!]} icon={icon}>
             <Popup maxWidth={270}>
-              <strong style={{ fontSize: 13 }}>{cam.title ?? 'Windy webcam'}</strong>
+              <strong style={{ fontSize: 13 }}>{cam.title}</strong>
               <div style={{ fontSize: 11, color: '#8b949e', marginTop: 2 }}>
                 {[loc.city, loc.region, loc.country].filter(Boolean).join(', ')}
               </div>

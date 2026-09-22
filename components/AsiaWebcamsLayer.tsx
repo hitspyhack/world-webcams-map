@@ -39,6 +39,14 @@ function makeIcon(url: string) {
 const ICONS = Object.fromEntries(Object.entries(ASIA_SOURCES).map(([k, v]) => [k, makeIcon(v.markerUrl)])) as Record<string, L.Icon>;
 const DEFAULT_ICON = makeIcon('https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png');
 
+/** Keep only cams that have valid coords + a non-empty title
+ *  + at least one media/link URL to show in the popup. */
+function isPopulated(cam: AsiaCam): boolean {
+  if (!cam.lat || !cam.lon || !isFinite(cam.lat) || !isFinite(cam.lon)) return false;
+  if (!cam.title?.trim()) return false;
+  return !!(cam.imageUrl || cam.sourceUrl);
+}
+
 interface Props {
   visible: Record<string, boolean>;
   onLoad?: (count: number) => void;
@@ -52,9 +60,9 @@ export default function AsiaWebcamsLayer({ visible, onLoad }: Props) {
       fetch('/api/asia-traffic/singapore').then(r => r.json()).catch(() => []),
       fetch('/api/asia-tourism').then(r => r.json()).catch(() => []),
     ]).then(([sg, tourism]) => {
-      const sgArr  = Array.isArray(sg)      ? sg      : (sg?.cameras ?? []);
+      const sgArr   = Array.isArray(sg)      ? sg      : (sg?.cameras ?? []);
       const tourArr = Array.isArray(tourism) ? tourism : [];
-      const all = [...sgArr, ...tourArr] as AsiaCam[];
+      const all = ([...sgArr, ...tourArr] as AsiaCam[]).filter(isPopulated);
       setCams(all);
       onLoad?.(all.length);
     });
@@ -65,7 +73,6 @@ export default function AsiaWebcamsLayer({ visible, onLoad }: Props) {
       {cams.map(cam => {
         const key  = cam.sourceCountry ?? cam.country ?? 'SG';
         if (!visible[key]) return null;
-        if (!cam.lat || !cam.lon) return null;
         const cfg  = ASIA_SOURCES[key];
         const icon = ICONS[key] ?? DEFAULT_ICON;
         return (

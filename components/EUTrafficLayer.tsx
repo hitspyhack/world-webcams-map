@@ -61,6 +61,21 @@ const ICONS = Object.fromEntries(
 
 const DEFAULT_ICON = makeIcon('https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png');
 
+/** A traffic cam is populated when it has valid coords + at least one
+ *  displayable element beyond its title (image URL, stream URL, or road data). */
+function isPopulated(cam: TrafficCam): boolean {
+  if (!cam.lat || !cam.lon || !isFinite(cam.lat) || !isFinite(cam.lon)) return false;
+  // Must have at least a title or a URL — pure coordinate-only entries are useless on the map
+  const hasContent =
+    !!(cam.title?.trim()) ||
+    !!(cam.imageUrl) ||
+    !!(cam.sourceUrl) ||
+    !!(cam.webcamUrl);
+  if (!hasContent) return false;
+  // Require at least one actionable piece: an image to preview OR a link to follow
+  return !!(cam.imageUrl || cam.sourceUrl || cam.webcamUrl || cam.roadCondition);
+}
+
 interface Props {
   visible: Record<string, boolean>;
   /** Called once after the initial fetch resolves, with total camera count. */
@@ -79,7 +94,7 @@ export default function EUTrafficLayer({ visible, onLoad }: Props) {
     fetch(`/api/eu-traffic?countries=${countries}`)
       .then(r => r.json())
       .then(data => {
-        const arr: TrafficCam[] = Array.isArray(data) ? data : [];
+        const arr: TrafficCam[] = (Array.isArray(data) ? data : []).filter(isPopulated);
         setCams(arr);
         onLoadRef.current?.(arr.length);
       })
@@ -93,11 +108,8 @@ export default function EUTrafficLayer({ visible, onLoad }: Props) {
     <>
       {cams.map(cam => {
         const key = cam.sourceCountry ?? cam.country ?? 'EU';
-        // If key is not in EU_COUNTRIES, still show it under 'EU' config
         const cfgKey = key in EU_COUNTRIES ? key : 'EU';
-        // Respect visibility toggle — default to true if key not yet in visible map
         if (visible[cfgKey] === false) return null;
-        if (!cam.lat || !cam.lon) return null;
         const icon = ICONS[cfgKey] ?? DEFAULT_ICON;
         const cfg  = EU_COUNTRIES[cfgKey];
         const imgSrc = cam.imageUrl ?? cam.sourceUrl ?? cam.webcamUrl ?? '';
