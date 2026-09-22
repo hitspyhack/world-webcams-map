@@ -63,7 +63,7 @@ interface AsiaCam {
   country?: string; city?: string; sourceCountry?: string;
 }
 
-// ─── Country centroids (ISO-3166-1 alpha-2) ────────────────────────────────────────────
+// ─── Country centroids ─────────────────────────────────────────────────────────────────
 const COUNTRY_CENTROIDS: Record<string, { name: string; lat: number; lon: number }> = {
   AD:{name:'Andorra',lat:42.55,lon:1.60},AE:{name:'United Arab Emirates',lat:23.42,lon:53.85},
   AF:{name:'Afghanistan',lat:33.93,lon:67.71},AG:{name:'Antigua and Barbuda',lat:17.06,lon:-61.80},
@@ -163,6 +163,26 @@ const COUNTRY_CENTROIDS: Record<string, { name: string; lat: number; lon: number
   ZA:{name:'South Africa',lat:-30.56,lon:22.94},ZM:{name:'Zambia',lat:-13.13,lon:27.85},
   ZW:{name:'Zimbabwe',lat:-19.02,lon:29.15},
 };
+
+// Country bounding-box radii (degrees). Larger countries get a wider box.
+const COUNTRY_BBOX_RADIUS: Record<string, number> = {
+  RU:45, CA:45, US:30, CN:25, BR:25, AU:25, IN:15, AR:20,
+  KZ:15, DZ:15, CD:12, SA:12, MX:12, ID:12, SU:12,
+};
+const DEFAULT_BBOX_RADIUS = 6; // degrees lat/lon around centroid
+
+/**
+ * Build a "north,east,south,west" bbox string wide enough to cover the whole country.
+ * Clamped to world bounds.
+ */
+function countryBbox(code: string, lat: number, lon: number): string {
+  const r = COUNTRY_BBOX_RADIUS[code] ?? DEFAULT_BBOX_RADIUS;
+  const north = Math.min( 90,  lat + r);
+  const south = Math.max(-90,  lat - r);
+  const east  = Math.min( 180, lon + r);
+  const west  = Math.max(-180, lon - r);
+  return `${north},${east},${south},${west}`;
+}
 
 function toCode(raw?: string): string {
   if (!raw) return '';
@@ -345,6 +365,17 @@ export default function MapClient() {
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
   }, [skylineCams, earthCams, osmCams, deckCams, euCams, asiaCams, windyGlobeCams]);
 
+  /**
+   * Compute a bbox string wide enough to cover the selected country so that
+   * WindyLayer can fetch all Windy cams for that country immediately, without
+   * waiting for the user to pan/zoom.
+   * Null when no country is selected → hook falls back to live map viewport.
+   */
+  const windyForceBbox = useMemo(() => {
+    if (!countryFilter) return null;
+    return countryBbox(countryFilter.code, countryFilter.lat, countryFilter.lon);
+  }, [countryFilter]);
+
   const handleCountrySelect = useCallback((entry: CountryEntry | null) => {
     setCountryFilter(entry);
     if (entry && mode === 'map') {
@@ -509,6 +540,7 @@ export default function MapClient() {
           onFlyToDone={() => setFlyTo(null)}
           countryFilter={countryFilter}
           onClearFilter={() => handleCountrySelect(null)}
+          windyForceBbox={windyForceBbox}
         />
       </div>
 
@@ -534,7 +566,7 @@ export default function MapClient() {
         {mode === 'globe' ? '🗺 MAP' : '🌐 GLOBE'}
       </button>
 
-      {/* Country search — map mode only; globe mode uses GlobeView’s internal search */}
+      {/* Country search — map mode only */}
       {mode === 'map' && (
         <CountrySearch
           countries={countryList}

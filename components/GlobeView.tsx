@@ -41,15 +41,10 @@ interface Props {
   onToggleEu:   (key: string) => void;
   onToggleAsia: (key: string) => void;
   onEnterMap: () => void;
-  /** Called when user wants to view cam in map (no-embed fallback) */
   onCamClick?: (cam: GlobeCam) => void;
-  /** Country filter set from the search bar */
   countryFilter?: CountryEntry | null;
-  /** Clear the active country filter */
   onClearFilter?: () => void;
-  /** Country list for the search dropdown */
   countries?: CountryEntry[];
-  /** Called when user selects a country from search */
   onSearchSelect?: (c: CountryEntry | null) => void;
 }
 
@@ -95,13 +90,10 @@ function dotRadius(source: string | undefined, hovered: boolean): number {
 }
 
 // ---------------------------------------------------------------------------
-// Cam drawer — appears in bottom-left, slides up when a cam is selected
+// Cam drawer
 // ---------------------------------------------------------------------------
 function CamDrawer({
-  cam,
-  onClose,
-  onExpand,
-  onViewInMap,
+  cam, onClose, onExpand, onViewInMap,
 }: {
   cam: GlobeCam | null;
   onClose: () => void;
@@ -109,137 +101,70 @@ function CamDrawer({
   onViewInMap: (cam: GlobeCam) => void;
 }) {
   if (!cam) return null;
-
   const badgeColor = SOURCE_BADGE_COLORS[cam.source ?? ''] ?? '#8b949e';
   const hasEmbed   = !!cam.embedUrl;
   const hasImage   = !!cam.imageUrl;
 
   return (
-    <div
-      style={{
-        position: 'absolute',
-        bottom: 110,
-        left: 12,
-        zIndex: 20,
-        width: 280,
-        background: 'rgba(4,14,10,0.97)',
-        border: '1px solid rgba(0,200,90,0.35)',
-        borderRadius: 10,
-        fontFamily: 'monospace',
-        fontSize: 11,
-        color: '#a0ffcc',
-        backdropFilter: 'blur(12px)',
-        boxShadow: '0 8px 32px rgba(0,0,0,0.7)',
-        overflow: 'hidden',
-        animation: 'drawerSlideUp 0.22s cubic-bezier(0.16,1,0.3,1)',
-      }}
-    >
+    <div style={{
+      position: 'absolute', bottom: 110, left: 12, zIndex: 20, width: 280,
+      background: 'rgba(4,14,10,0.97)', border: '1px solid rgba(0,200,90,0.35)',
+      borderRadius: 10, fontFamily: 'monospace', fontSize: 11, color: '#a0ffcc',
+      backdropFilter: 'blur(12px)', boxShadow: '0 8px 32px rgba(0,0,0,0.7)',
+      overflow: 'hidden', animation: 'drawerSlideUp 0.22s cubic-bezier(0.16,1,0.3,1)',
+    }}>
       <style>{`
         @keyframes drawerSlideUp {
           from { opacity: 0; transform: translateY(18px); }
           to   { opacity: 1; transform: translateY(0); }
         }
       `}</style>
-
-      {/* Header */}
       <div style={{
         display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
-        padding: '9px 10px 6px',
-        borderBottom: '1px solid rgba(0,200,90,0.15)',
+        padding: '9px 10px 6px', borderBottom: '1px solid rgba(0,200,90,0.15)',
       }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{
-            fontSize: 12, fontWeight: 700, color: '#e6edf3',
-            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-          }}>{cam.title}</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#e6edf3', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{cam.title}</div>
           {cam.source && (
-            <div style={{
-              marginTop: 3, fontSize: 9, letterSpacing: '0.08em',
-              color: badgeColor, fontWeight: 700,
-            }}>
+            <div style={{ marginTop: 3, fontSize: 9, letterSpacing: '0.08em', color: badgeColor, fontWeight: 700 }}>
               SOURCE: {cam.source.toUpperCase()}
             </div>
           )}
         </div>
-        <button
-          onClick={onClose}
-          aria-label="Close cam panel"
-          style={{
-            background: 'none', border: 'none', color: '#8b949e',
-            fontSize: 14, cursor: 'pointer', lineHeight: 1,
-            padding: '0 0 0 8px', flexShrink: 0,
-            transition: 'color 0.15s',
-          }}
+        <button onClick={onClose} aria-label="Close cam panel"
+          style={{ background: 'none', border: 'none', color: '#8b949e', fontSize: 14, cursor: 'pointer', lineHeight: 1, padding: '0 0 0 8px', flexShrink: 0, transition: 'color 0.15s' }}
           onMouseEnter={e => (e.currentTarget.style.color = '#f87171')}
           onMouseLeave={e => (e.currentTarget.style.color = '#8b949e')}
         >✕</button>
       </div>
-
-      {/* Media area */}
       {hasEmbed ? (
         <div style={{ position: 'relative', width: '100%', aspectRatio: '16/9', background: '#04080f' }}>
-          <iframe
-            src={cam.embedUrl}
-            title={cam.title}
-            allowFullScreen
-            style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
-          />
+          <iframe src={cam.embedUrl} title={cam.title} allowFullScreen
+            style={{ width: '100%', height: '100%', border: 'none', display: 'block' }} />
         </div>
       ) : hasImage ? (
         <div style={{ position: 'relative', width: '100%', lineHeight: 0 }}>
-          <img
-            src={cam.imageUrl}
-            alt={cam.title}
-            style={{
-              width: '100%', display: 'block',
-              background: '#04080f', maxHeight: 160, objectFit: 'cover',
-            }}
-            loading="lazy"
-            onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+          <img src={cam.imageUrl} alt={cam.title}
+            style={{ width: '100%', display: 'block', background: '#04080f', maxHeight: 160, objectFit: 'cover' }}
+            loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
           />
         </div>
       ) : (
-        <div style={{
-          padding: '18px 0', textAlign: 'center',
-          fontSize: 10, color: 'rgba(0,200,90,0.35)', letterSpacing: '0.06em',
-        }}>
+        <div style={{ padding: '18px 0', textAlign: 'center', fontSize: 10, color: 'rgba(0,200,90,0.35)', letterSpacing: '0.06em' }}>
           NO PREVIEW AVAILABLE
         </div>
       )}
-
-      {/* Action buttons */}
       <div style={{ display: 'flex', gap: 6, padding: '8px 10px' }}>
         {(hasEmbed || hasImage) && (
           <button
-            onClick={() => onExpand({
-              source: (cam.source ?? 'osm') as CamLightboxEntry['source'],
-              title: cam.title,
-              embedUrl: cam.embedUrl,
-              imageUrl: cam.imageUrl,
-              linkUrl: cam.linkUrl,
-            })}
-            style={{
-              flex: 1, padding: '5px 0',
-              background: 'rgba(0,200,90,0.10)',
-              border: '1px solid rgba(0,200,90,0.3)',
-              borderRadius: 6, color: '#6effb4',
-              fontSize: 10, cursor: 'pointer',
-              letterSpacing: '0.05em', transition: 'background 0.15s',
-            }}
+            onClick={() => onExpand({ source: (cam.source ?? 'osm') as CamLightboxEntry['source'], title: cam.title, embedUrl: cam.embedUrl, imageUrl: cam.imageUrl, linkUrl: cam.linkUrl })}
+            style={{ flex: 1, padding: '5px 0', background: 'rgba(0,200,90,0.10)', border: '1px solid rgba(0,200,90,0.3)', borderRadius: 6, color: '#6effb4', fontSize: 10, cursor: 'pointer', letterSpacing: '0.05em', transition: 'background 0.15s' }}
             onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,200,90,0.20)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'rgba(0,200,90,0.10)')}
           >⛶ EXPAND</button>
         )}
-        <button
-          onClick={() => onViewInMap(cam)}
-          style={{
-            flex: 1, padding: '5px 0',
-            background: 'rgba(88,166,255,0.08)',
-            border: '1px solid rgba(88,166,255,0.25)',
-            borderRadius: 6, color: '#79c0ff',
-            fontSize: 10, cursor: 'pointer',
-            letterSpacing: '0.05em', transition: 'background 0.15s',
-          }}
+        <button onClick={() => onViewInMap(cam)}
+          style={{ flex: 1, padding: '5px 0', background: 'rgba(88,166,255,0.08)', border: '1px solid rgba(88,166,255,0.25)', borderRadius: 6, color: '#79c0ff', fontSize: 10, cursor: 'pointer', letterSpacing: '0.05em', transition: 'background 0.15s' }}
           onMouseEnter={e => (e.currentTarget.style.background = 'rgba(88,166,255,0.18)')}
           onMouseLeave={e => (e.currentTarget.style.background = 'rgba(88,166,255,0.08)')}
         >🗺 VIEW IN MAP</button>
@@ -276,12 +201,8 @@ export default function GlobeView({
 
   const [legendOpen,    setLegendOpen]    = useState(false);
   const [legendSection, setLegendSection] = useState<'global' | 'eu' | 'asia'>('global');
-
-  // Lightbox (full-screen)
   const [lightboxEntry, setLightboxEntry] = useState<CamLightboxEntry | null>(null);
-
-  // Cam drawer (inline preview panel)
-  const [drawerCam, setDrawerCam] = useState<GlobeCam | null>(null);
+  const [drawerCam,     setDrawerCam]     = useState<GlobeCam | null>(null);
 
   // ── Draw one frame ───────────────────────────────────────────────────────
   const draw = useCallback((now: number) => {
@@ -319,18 +240,23 @@ export default function GlobeView({
 
     // Graticule
     ctx.save(); ctx.beginPath(); pathGen(d3.geoGraticule()());
-    ctx.strokeStyle = 'rgba(30,60,80,0.55)'; ctx.lineWidth = 0.4; ctx.stroke(); ctx.restore();
+    ctx.strokeStyle = 'rgba(30,80,60,0.45)'; ctx.lineWidth = 0.4; ctx.stroke(); ctx.restore();
 
-    // Land
+    // Land — full opacity, vivid green
     if (topoRef.current) {
-      ctx.save(); ctx.beginPath(); pathGen(topoRef.current);
-      ctx.fillStyle = '#1a3d2b'; ctx.strokeStyle = '#2a5c3f'; ctx.lineWidth = 0.6;
-      ctx.fill(); ctx.stroke(); ctx.restore();
+      ctx.save();
+      ctx.beginPath(); pathGen(topoRef.current);
+      ctx.fillStyle   = '#2d7a48'; // full-opacity land fill
+      ctx.strokeStyle = '#52c47a'; // bright border
+      ctx.lineWidth   = 0.7;
+      ctx.globalAlpha = 1;        // explicitly 100%
+      ctx.fill(); ctx.stroke();
+      ctx.restore();
     }
 
     // Globe rim
     ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, radius, 0, 2 * Math.PI);
-    ctx.strokeStyle = 'rgba(0,200,120,0.25)'; ctx.lineWidth = 1.5; ctx.stroke(); ctx.restore();
+    ctx.strokeStyle = 'rgba(0,200,120,0.30)'; ctx.lineWidth = 1.5; ctx.stroke(); ctx.restore();
 
     // Cam dots
     const hov = hoveredRef.current;
@@ -351,10 +277,10 @@ export default function GlobeView({
       ctx.fill(); ctx.restore();
     }
 
-    // Atmosphere
+    // Atmosphere glow
     ctx.save();
     const atm = ctx.createRadialGradient(cx, cy, radius * 0.92, cx, cy, radius * 1.15);
-    atm.addColorStop(0, 'rgba(0,220,120,0.10)'); atm.addColorStop(1, 'rgba(0,0,0,0)');
+    atm.addColorStop(0, 'rgba(0,220,120,0.08)'); atm.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.beginPath(); ctx.arc(cx, cy, radius * 1.15, 0, 2 * Math.PI);
     ctx.fillStyle = atm; ctx.fill(); ctx.restore();
 
@@ -391,12 +317,10 @@ export default function GlobeView({
     return () => ro.disconnect();
   }, []);
 
-  // Rotate globe to bring [lon, lat] into front-centre
   const rotateTo = useCallback((lon: number, lat: number) => {
     rotRef.current = [-lon, -lat, 0];
   }, []);
 
-  // Hit-test
   const getCamAt = useCallback((ex: number, ey: number): GlobeCam | null => {
     const canvas = canvasRef.current, proj = projRef.current;
     if (!canvas || !proj) return null;
@@ -416,14 +340,12 @@ export default function GlobeView({
     return best;
   }, [cams]);
 
-  // ── Mouse handlers ───────────────────────────────────────────────────────
   const onMouseMove = useCallback((e: React.MouseEvent) => {
     if (dragRef.current.active) {
       const dx = e.clientX - dragRef.current.x, dy = e.clientY - dragRef.current.y;
       rotRef.current = [
         rotRef.current[0] + dx * 0.5,
-        Math.max(-60, Math.min(60, rotRef.current[1] - dy * 0.5)),
-        0,
+        Math.max(-60, Math.min(60, rotRef.current[1] - dy * 0.5)), 0,
       ];
       dragRef.current = { active: true, x: e.clientX, y: e.clientY };
     }
@@ -444,47 +366,27 @@ export default function GlobeView({
     if (canvas) canvas.style.cursor = cam ? 'pointer' : (dragRef.current.active ? 'grabbing' : 'grab');
   }, [getCamAt]);
 
-  const onMouseDown = useCallback((e: React.MouseEvent) => {
-    pauseRef.current = true;
-    dragRef.current = { active: true, x: e.clientX, y: e.clientY };
-  }, []);
-
-  const onMouseUp = useCallback(() => {
-    dragRef.current.active = false;
-    pauseRef.current = false;
-  }, []);
-
+  const onMouseDown  = useCallback((e: React.MouseEvent) => { pauseRef.current = true; dragRef.current = { active: true, x: e.clientX, y: e.clientY }; }, []);
+  const onMouseUp    = useCallback(() => { dragRef.current.active = false; pauseRef.current = false; }, []);
   const onMouseLeave = useCallback(() => {
-    dragRef.current.active = false;
-    pauseRef.current = false;
-    hoveredRef.current = null;
+    dragRef.current.active = false; pauseRef.current = false; hoveredRef.current = null;
     if (tooltipRef.current) tooltipRef.current.style.opacity = '0';
   }, []);
 
   const onClick = useCallback((e: React.MouseEvent) => {
     const cam = getCamAt(e.clientX, e.clientY);
     if (!cam) return;
-    // Always open the drawer first so user sees context before deciding
     setDrawerCam(cam);
   }, [getCamAt]);
 
-  // Drawer actions
-  const handleDrawerExpand = useCallback((entry: CamLightboxEntry) => {
-    setLightboxEntry(entry);
-  }, []);
-
+  const handleDrawerExpand  = useCallback((entry: CamLightboxEntry) => { setLightboxEntry(entry); }, []);
   const handleDrawerViewInMap = useCallback((cam: GlobeCam) => {
     setDrawerCam(null);
-    if (onCamClick) onCamClick(cam);
-    else onEnterMap();
+    if (onCamClick) onCamClick(cam); else onEnterMap();
   }, [onCamClick, onEnterMap]);
 
-  // Touch handlers
-  const onTouchStart = useCallback((e: React.TouchEvent) => {
-    pauseRef.current = true;
-    const t = e.touches[0]; lastTouchRef.current = { x: t.clientX, y: t.clientY };
-  }, []);
-  const onTouchMove = useCallback((e: React.TouchEvent) => {
+  const onTouchStart = useCallback((e: React.TouchEvent) => { pauseRef.current = true; const t = e.touches[0]; lastTouchRef.current = { x: t.clientX, y: t.clientY }; }, []);
+  const onTouchMove  = useCallback((e: React.TouchEvent) => {
     const t = e.touches[0]; const prev = lastTouchRef.current; if (!prev) return;
     rotRef.current = [
       rotRef.current[0] + (t.clientX - prev.x) * 0.5,
@@ -492,16 +394,12 @@ export default function GlobeView({
     ];
     lastTouchRef.current = { x: t.clientX, y: t.clientY };
   }, []);
-  const onTouchEnd = useCallback(() => {
-    pauseRef.current = false; lastTouchRef.current = null;
-  }, []);
+  const onTouchEnd = useCallback(() => { pauseRef.current = false; lastTouchRef.current = null; }, []);
 
-  // ── When countryFilter changes, rotate globe to face it ─────────────────
   useEffect(() => {
     if (countryFilter) rotateTo(countryFilter.lon, countryFilter.lat);
   }, [countryFilter, rotateTo]);
 
-  // ── Render ───────────────────────────────────────────────────────────────
   const displayCount = totalCount ?? cams.length;
 
   return (
@@ -510,7 +408,7 @@ export default function GlobeView({
       {/* Scanline overlay */}
       <div style={{
         position: 'absolute', inset: 0, zIndex: 1, pointerEvents: 'none',
-        backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,255,100,0.018) 2px, rgba(0,255,100,0.018) 4px)',
+        backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,255,100,0.012) 2px, rgba(0,255,100,0.012) 4px)',
       }} />
 
       <canvas
@@ -521,15 +419,13 @@ export default function GlobeView({
         onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
       />
 
-      {/* HUD — top-center */}
+      {/* HUD */}
       <div style={{
         position: 'absolute', top: 20, left: '50%', transform: 'translateX(-50%)',
         zIndex: 10, textAlign: 'center', pointerEvents: 'none',
         fontFamily: 'monospace', letterSpacing: '0.2em',
       }}>
-        <div style={{ fontSize: 13, color: 'rgba(0,220,120,0.9)', textTransform: 'uppercase' }}>
-          ◉ LIVE SURVEILLANCE NETWORK
-        </div>
+        <div style={{ fontSize: 13, color: 'rgba(0,220,120,0.9)', textTransform: 'uppercase' }}>◉ LIVE SURVEILLANCE NETWORK</div>
         <div style={{ fontSize: 10, color: 'rgba(0,180,80,0.5)', marginTop: 3 }}>
           {loading ? 'LOADING…' : `${displayCount.toLocaleString()} CAMERAS ONLINE`}
         </div>
@@ -540,22 +436,12 @@ export default function GlobeView({
         )}
       </div>
 
-      {/* ── Country Search Bar ── */}
-      {/*
-        Rendered inline inside GlobeView (z-index 30) so it works even when
-        MapClient is not the direct parent. Offset left so it clears the
-        🗺 MAP toggle button that MapClient places at top:14, left:14.
-        If MapClient also renders CountrySearch, that outer one is hidden
-        while this one is active — they share the same selected/onSelect props.
-      */}
+      {/* Country Search Bar */}
       {countries.length > 0 && (
         <div style={{
           position: 'absolute', top: 14, left: '50%',
-          transform: 'translateX(-50%)',
-          // push right of the toggle button (≈ 95px wide incl shadow)
-          marginLeft: 48,
-          zIndex: 30,
-          width: 320, maxWidth: 'calc(100vw - 180px)',
+          transform: 'translateX(-50%)', marginLeft: 48,
+          zIndex: 30, width: 320, maxWidth: 'calc(100vw - 180px)',
         }}>
           <CountrySearch
             countries={countries}
@@ -565,36 +451,25 @@ export default function GlobeView({
         </div>
       )}
 
-      {/* Active country filter badge — shown below HUD when search is NOT available */}
+      {/* Active filter badge — only when search dropdown not shown */}
       {countryFilter && countries.length === 0 && (
         <div style={{
           position: 'absolute', top: 72, left: '50%', transform: 'translateX(-50%)',
           zIndex: 10, display: 'flex', alignItems: 'center', gap: 8,
-          background: 'rgba(4,14,10,0.90)',
-          border: '1px solid rgba(88,166,255,0.45)',
+          background: 'rgba(4,14,10,0.90)', border: '1px solid rgba(88,166,255,0.45)',
           borderRadius: 20, padding: '4px 12px 4px 14px',
-          fontFamily: 'monospace', fontSize: 11,
-          color: '#79c0ff', letterSpacing: '0.06em',
-          boxShadow: '0 2px 12px rgba(0,0,0,0.5)',
-          pointerEvents: 'auto',
+          fontFamily: 'monospace', fontSize: 11, color: '#79c0ff', letterSpacing: '0.06em',
+          boxShadow: '0 2px 12px rgba(0,0,0,0.5)', pointerEvents: 'auto',
         }}>
           <span>🔍 {countryFilter.name}</span>
-          <button
-            onClick={onClearFilter}
-            aria-label="Clear country filter"
-            style={{
-              background: 'none', border: 'none',
-              color: '#8b949e', fontSize: 13,
-              cursor: 'pointer', lineHeight: 1, padding: 0,
-              transition: 'color 0.15s',
-            }}
+          <button onClick={onClearFilter} aria-label="Clear country filter"
+            style={{ background: 'none', border: 'none', color: '#8b949e', fontSize: 13, cursor: 'pointer', lineHeight: 1, padding: 0, transition: 'color 0.15s' }}
             onMouseEnter={e => (e.currentTarget.style.color = '#f87171')}
             onMouseLeave={e => (e.currentTarget.style.color = '#8b949e')}
           >✕</button>
         </div>
       )}
 
-      {/* ── Cam Drawer (inline expandable panel) ── */}
       <CamDrawer
         cam={drawerCam}
         onClose={() => setDrawerCam(null)}
@@ -602,16 +477,14 @@ export default function GlobeView({
         onViewInMap={handleDrawerViewInMap}
       />
 
-      {/* ── Source legend / filter panel ── */}
+      {/* Source legend */}
       <div style={{
         position: 'absolute', bottom: 24, right: 12, zIndex: 10,
         background: 'rgba(4,14,10,0.92)', border: '1px solid rgba(0,200,90,0.3)',
         borderRadius: 10, fontFamily: 'monospace', fontSize: 11, color: '#a0ffcc',
-        backdropFilter: 'blur(10px)', minWidth: 200,
-        boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+        backdropFilter: 'blur(10px)', minWidth: 200, boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
       }}>
-        <button
-          onClick={() => setLegendOpen(o => !o)}
+        <button onClick={() => setLegendOpen(o => !o)}
           style={{
             width: '100%', padding: '8px 12px',
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -638,7 +511,6 @@ export default function GlobeView({
                 }}>{sec.toUpperCase()}</button>
               ))}
             </div>
-
             {legendSection === 'global' && (
               <>
                 {(Object.entries(SOURCE_LABELS) as [SourceKey, string][]).map(([key, label]) => (
@@ -679,34 +551,25 @@ export default function GlobeView({
         )}
       </div>
 
-      {/* Enter map CTA */}
-      <button
-        onClick={onEnterMap}
+      <button onClick={onEnterMap}
         style={{
           position: 'absolute', bottom: 36, left: '50%', transform: 'translateX(-50%)',
           zIndex: 10, padding: '10px 28px',
-          background: 'rgba(0,30,20,0.85)',
-          border: '1px solid rgba(0,220,100,0.5)',
+          background: 'rgba(0,30,20,0.85)', border: '1px solid rgba(0,220,100,0.5)',
           borderRadius: 6, color: 'rgba(0,220,100,0.95)',
           fontFamily: 'monospace', fontSize: 13, letterSpacing: '0.15em',
-          cursor: 'pointer', boxShadow: '0 0 18px rgba(0,200,80,0.15)',
-          transition: 'background 0.2s',
+          cursor: 'pointer', boxShadow: '0 0 18px rgba(0,200,80,0.15)', transition: 'background 0.2s',
         }}
         onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,50,30,0.95)')}
         onMouseLeave={e => (e.currentTarget.style.background = 'rgba(0,30,20,0.85)')}
-      >
-        ▶ ENTER MAP VIEW
-      </button>
+      >▶ ENTER MAP VIEW</button>
 
       <div style={{
         position: 'absolute', bottom: 80, left: '50%', transform: 'translateX(-50%)',
         zIndex: 10, fontSize: 10, color: 'rgba(0,180,80,0.4)',
         fontFamily: 'monospace', letterSpacing: '0.1em', pointerEvents: 'none',
-      }}>
-        HOLD & DRAG TO ROTATE · CLICK DOT TO VIEW LIVE FEED
-      </div>
+      }}>HOLD & DRAG TO ROTATE · CLICK DOT TO VIEW LIVE FEED</div>
 
-      {/* Cam tooltip */}
       <div ref={tooltipRef} style={{
         position: 'fixed', zIndex: 20, pointerEvents: 'none',
         padding: '4px 9px', background: 'rgba(4,14,10,0.92)',
@@ -716,7 +579,6 @@ export default function GlobeView({
         opacity: 0, transition: 'opacity 0.1s', whiteSpace: 'nowrap',
       }} />
 
-      {/* Full-screen lightbox */}
       <CamLightbox entry={lightboxEntry} onClose={() => setLightboxEntry(null)} />
     </div>
   );

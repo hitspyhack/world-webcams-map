@@ -9,6 +9,13 @@ export interface UseWindyWebcamsOptions {
   debounceMs?: number;
   /** Max cameras per request (Windy free-tier: ≤ 50). Default: 50 */
   limit?: number;
+  /**
+   * When set, overrides the live map-viewport bbox with a fixed
+   * "north,east,south,west" string. Used when a country filter is active
+   * so all cams for that country are loaded regardless of what's visible.
+   * The hook still re-fetches when this value changes.
+   */
+  forceBbox?: string | null;
 }
 
 export interface UseWindyWebcamsResult {
@@ -24,6 +31,7 @@ export function useWindyWebcams({
   enabled    = true,
   debounceMs = 600,
   limit      = 50,
+  forceBbox  = null,
 }: UseWindyWebcamsOptions = {}): UseWindyWebcamsResult {
   const map = useMap();
 
@@ -34,23 +42,20 @@ export function useWindyWebcams({
 
   const abortRef   = useRef<AbortController | null>(null);
   const timerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // If the key is missing we only need to discover that once.
   const keyMissing = useRef(false);
 
-  const fetchCams = useCallback(async () => {
+  const fetchCams = useCallback(async (overrideBbox?: string) => {
     if (!enabled || keyMissing.current) return;
 
     abortRef.current?.abort();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
 
-    const bounds = map.getBounds();
-    const bbox   = [
-      bounds.getNorth(),
-      bounds.getEast(),
-      bounds.getSouth(),
-      bounds.getWest(),
-    ].join(',');
+    // Use forceBbox (or caller-supplied override) first, fall back to map viewport
+    const bbox = overrideBbox ?? forceBbox ?? (() => {
+      const b = map.getBounds();
+      return [b.getNorth(), b.getEast(), b.getSouth(), b.getWest()].join(',');
+    })();
 
     setLoading(true);
     setError(null);
@@ -62,7 +67,6 @@ export function useWindyWebcams({
       );
       const json = await res.json();
 
-      // Graceful no-key path: server returns 200 + missingKey flag.
       if (json?.missingKey) {
         keyMissing.current = true;
         setMissingKey(true);
@@ -86,28 +90,29 @@ export function useWindyWebcams({
       setWebcams(list);
       setError(null);
     } catch (e: unknown) {
-      if ((e as Error)?.name === 'AbortError') return; // map moved — ignore
+      if ((e as Error)?.name === 'AbortError') return;
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
-  }, [enabled, limit, map]);
+  }, [enabled, limit, forceBbox, map]);
 
-  // Debounced re-fetch on map move/zoom
+  // Debounced re-fetch on map move/zoom — only when NOT overriding with forceBbox
   const schedule = useCallback(() => {
+    if (forceBbox) return; // country filter active — don't override with viewport
     if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(fetchCams, debounceMs);
-  }, [fetchCams, debounceMs]);
+    timerRef.current = setTimeout(() => fetchCams(), debounceMs);
+  }, [fetchCams, debounceMs, forceBbox]);
 
   useMapEvents({ moveend: schedule, zoomend: schedule });
 
-  // Initial fetch on mount / when enabled toggles on
+  // Re-fetch whenever enabled toggles or forceBbox changes
   useEffect(() => {
     if (enabled && !keyMissing.current) fetchCams();
     if (!enabled) { setWebcams([]); setLoading(false); setError(null); }
+  // fetchCams already captures forceBbox via closure — this triggers on forceBbox change too
   }, [enabled, fetchCams]);
 
-  // Cleanup on unmount
   useEffect(() => () => {
     abortRef.current?.abort();
     if (timerRef.current) clearTimeout(timerRef.current);
