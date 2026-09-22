@@ -15,25 +15,33 @@ export async function GET(request: Request) {
     );
   }
 
-  const url = `${BASE_URL}?bbox=${encodeURIComponent(bbox)}&include=${include}&limit=100`;
+  // Use a smaller bounding box for initial load to stay within free tier limits
+  const url = `${BASE_URL}?bbox=${encodeURIComponent(bbox)}&include=${include}&limit=50`;
+
+  console.log('[windy] fetching:', url);
 
   try {
     const res = await fetch(url, {
-      headers: { 'x-windy-api-key': apiKey },
-      next: { revalidate: 300 }, // cache 5 minutes
+      headers: {
+        'x-windy-api-key': apiKey,
+        'Content-Type': 'application/json',
+      },
     });
 
+    const text = await res.text();
+    console.log('[windy] status:', res.status, 'body:', text.slice(0, 300));
+
     if (!res.ok) {
-      const text = await res.text();
       return NextResponse.json(
         { error: 'Windy API error', status: res.status, body: text },
         { status: 502 }
       );
     }
 
-    const data = await res.json();
+    const data = JSON.parse(text);
     return NextResponse.json(data, { status: 200 });
   } catch (err: unknown) {
+    console.error('[windy] fetch error:', err);
     return NextResponse.json(
       { error: 'Network error', message: err instanceof Error ? err.message : String(err) },
       { status: 500 }
