@@ -10,18 +10,17 @@ export async function GET(request: Request) {
   const apiKey = process.env.WINDY_WEBCAMS_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
-      { error: 'WINDY_WEBCAMS_API_KEY not configured' },
+      { error: 'WINDY_WEBCAMS_API_KEY not configured — add it to .env.local' },
       { status: 500 }
     );
   }
 
-  const url = `${BASE_URL}?bbox=${bbox}&include=${include}`;
+  const url = `${BASE_URL}?bbox=${encodeURIComponent(bbox)}&include=${include}&limit=100`;
 
   try {
     const res = await fetch(url, {
-      headers: {
-        'x-windy-api-key': apiKey,
-      },
+      headers: { 'x-windy-api-key': apiKey },
+      next: { revalidate: 300 }, // cache 5 minutes
     });
 
     if (!res.ok) {
@@ -34,9 +33,9 @@ export async function GET(request: Request) {
 
     const data = await res.json();
     return NextResponse.json(data, { status: 200 });
-  } catch (err: any) {
+  } catch (err: unknown) {
     return NextResponse.json(
-      { error: 'Network or fetch error', message: err?.message },
+      { error: 'Network error', message: err instanceof Error ? err.message : String(err) },
       { status: 500 }
     );
   }

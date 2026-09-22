@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import L from 'leaflet';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 
-// --- Types ---
+// ---- Types ----
 
 interface WindyLocation {
   latitude: number;
@@ -19,13 +19,8 @@ interface WindyWebcam {
   id?: string;
   title?: string;
   location?: WindyLocation;
-  images?: {
-    current?: { preview?: string };
-  };
-  urls?: {
-    player?: string;
-    webcam?: string;
-  };
+  images?: { current?: { preview?: string } };
+  urls?: { player?: string; webcam?: string };
 }
 
 interface SkylineGps {
@@ -43,13 +38,12 @@ interface SkylineItem {
   country?: string;
 }
 
-/** Safely coerce any API response to an array of T */
+/** Always return a safe array regardless of what the API gives back */
 function toArray<T>(val: unknown): T[] {
-  if (Array.isArray(val)) return val as T[];
-  return [];
+  return Array.isArray(val) ? (val as T[]) : [];
 }
 
-// --- Component ---
+// ---- Component ----
 
 export default function LeafletMap() {
   const [windyCams, setWindyCams] = useState<WindyWebcam[]>([]);
@@ -57,15 +51,12 @@ export default function LeafletMap() {
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
 
-  // Blue marker — Windy
   const windyIcon = useMemo(
     () =>
       new L.Icon({
         iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-        iconRetinaUrl:
-          'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-        shadowUrl:
-          'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+        iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+        shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
         iconSize: [25, 41],
         iconAnchor: [12, 41],
         popupAnchor: [1, -34],
@@ -74,16 +65,12 @@ export default function LeafletMap() {
     []
   );
 
-  // Red marker — Skyline
   const skylineIcon = useMemo(
     () =>
       new L.Icon({
-        iconUrl:
-          'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png',
-        iconRetinaUrl:
-          'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
-        shadowUrl:
-          'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+        iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png',
+        iconRetinaUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+        shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
         iconSize: [25, 41],
         iconAnchor: [12, 41],
         popupAnchor: [1, -34],
@@ -93,29 +80,25 @@ export default function LeafletMap() {
   );
 
   useEffect(() => {
-    const errs: string[] = [];
-
     const fetchAll = async () => {
       setLoading(true);
       setErrors([]);
+      const errs: string[] = [];
 
-      // --- Windy ---
+      // Windy
       try {
         const res = await fetch('/api/windy-webcams?bbox=90,180,-90,-180');
         const json = await res.json();
         if (!res.ok) {
           errs.push(`Windy: ${json?.error ?? res.statusText}`);
         } else {
-          const cams = toArray<WindyWebcam>(
-            json.webcams ?? json.result?.webcams
-          );
-          setWindyCams(cams);
+          setWindyCams(toArray<WindyWebcam>(json.webcams ?? json.result?.webcams));
         }
       } catch (e: unknown) {
-        errs.push(`Windy network error: ${e instanceof Error ? e.message : e}`);
+        errs.push(`Windy network error: ${e instanceof Error ? e.message : String(e)}`);
       }
 
-      // --- Skyline ---
+      // Skyline
       try {
         const res = await fetch('/api/skyline-webcams', {
           method: 'POST',
@@ -129,9 +112,7 @@ export default function LeafletMap() {
           setSkylineCams(toArray<SkylineItem>(json));
         }
       } catch (e: unknown) {
-        errs.push(
-          `Skyline network error: ${e instanceof Error ? e.message : e}`
-        );
+        errs.push(`Skyline network error: ${e instanceof Error ? e.message : String(e)}`);
       }
 
       setErrors(errs);
@@ -154,61 +135,35 @@ export default function LeafletMap() {
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
 
-        {/* Windy webcams — blue markers */}
+        {/* Windy — blue markers */}
         {windyCams.map((cam) => {
           const loc = cam.location;
           if (!loc) return null;
           const { latitude: lat, longitude: lon } = loc;
           if (lat == null || lon == null) return null;
-          const preview = cam.images?.current?.preview;
           const id = cam.webcamId ?? cam.id ?? `${lat}-${lon}`;
-
+          const preview = cam.images?.current?.preview;
           return (
-            <Marker
-              key={`windy-${id}`}
-              position={[lat, lon]}
-              icon={windyIcon}
-            >
+            <Marker key={`windy-${id}`} position={[lat, lon]} icon={windyIcon}>
               <Popup maxWidth={260}>
                 <strong>{cam.title ?? 'Windy webcam'}</strong>
                 <br />
                 <span style={{ fontSize: 12, color: '#555' }}>
-                  {[loc.city, loc.region, loc.country]
-                    .filter(Boolean)
-                    .join(', ')}
+                  {[loc.city, loc.region, loc.country].filter(Boolean).join(', ')}
                 </span>
                 {preview && (
                   <div style={{ marginTop: 8 }}>
-                    <img
-                      src={preview}
-                      alt={cam.title ?? 'Webcam preview'}
-                      style={{ maxWidth: 240, borderRadius: 6 }}
-                      loading="lazy"
-                    />
+                    <img src={preview} alt={cam.title ?? 'Webcam'} style={{ maxWidth: 240, borderRadius: 6 }} loading="lazy" />
                   </div>
                 )}
                 {cam.urls?.player && (
                   <div style={{ marginTop: 8 }}>
-                    <iframe
-                      src={cam.urls.player}
-                      title={`${cam.title ?? 'Webcam'} timelapse`}
-                      width="240"
-                      height="135"
-                      loading="lazy"
-                      style={{ border: 0, borderRadius: 6 }}
-                    />
+                    <iframe src={cam.urls.player} title="timelapse" width="240" height="135" loading="lazy" style={{ border: 0, borderRadius: 6 }} />
                   </div>
                 )}
                 {cam.urls?.webcam && (
                   <div style={{ marginTop: 6 }}>
-                    <a
-                      href={cam.urls.webcam}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ fontSize: 12 }}
-                    >
-                      Open on Windy ↗
-                    </a>
+                    <a href={cam.urls.webcam} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12 }}>Open on Windy ↗</a>
                   </div>
                 )}
               </Popup>
@@ -216,19 +171,14 @@ export default function LeafletMap() {
           );
         })}
 
-        {/* Skyline webcams — red markers */}
+        {/* Skyline — red markers */}
         {skylineCams.map((cam) => {
           const gps = cam.gps;
           if (!gps) return null;
           const { lat, lon } = gps;
           if (lat == null || lon == null) return null;
-
           return (
-            <Marker
-              key={`skyline-${cam.id ?? cam.url ?? `${lat}-${lon}`}`}
-              position={[lat, lon]}
-              icon={skylineIcon}
-            >
+            <Marker key={`skyline-${cam.id ?? cam.url ?? `${lat}-${lon}`}`} position={[lat, lon]} icon={skylineIcon}>
               <Popup maxWidth={260}>
                 <strong>{cam.title ?? 'Skyline webcam'}</strong>
                 <br />
@@ -237,24 +187,12 @@ export default function LeafletMap() {
                 </span>
                 {cam.snapshotUrl && (
                   <div style={{ marginTop: 8 }}>
-                    <img
-                      src={cam.snapshotUrl}
-                      alt={cam.title ?? 'Skyline snapshot'}
-                      style={{ maxWidth: 240, borderRadius: 6 }}
-                      loading="lazy"
-                    />
+                    <img src={cam.snapshotUrl} alt={cam.title ?? 'Skyline'} style={{ maxWidth: 240, borderRadius: 6 }} loading="lazy" />
                   </div>
                 )}
                 {cam.url && (
                   <div style={{ marginTop: 6 }}>
-                    <a
-                      href={cam.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ fontSize: 12 }}
-                    >
-                      Open on Skyline ↗
-                    </a>
+                    <a href={cam.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12 }}>Open on Skyline ↗</a>
                   </div>
                 )}
               </Popup>
@@ -264,94 +202,31 @@ export default function LeafletMap() {
       </MapContainer>
 
       {/* Legend */}
-      <div
-        style={{
-          position: 'absolute',
-          bottom: 24,
-          right: 12,
-          zIndex: 1000,
-          background: 'rgba(11,18,32,0.88)',
-          color: '#fff',
-          borderRadius: 8,
-          padding: '10px 14px',
-          fontSize: 12,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 6,
-          backdropFilter: 'blur(6px)',
-        }}
-      >
-        <div style={{ fontWeight: 700, marginBottom: 4, fontSize: 13 }}>
-          World Webcams Map
-        </div>
+      <div style={{ position: 'absolute', bottom: 24, right: 12, zIndex: 1000, background: 'rgba(11,18,32,0.88)', color: '#fff', borderRadius: 8, padding: '10px 14px', fontSize: 12, display: 'flex', flexDirection: 'column', gap: 6, backdropFilter: 'blur(6px)' }}>
+        <div style={{ fontWeight: 700, marginBottom: 4, fontSize: 13 }}>World Webcams Map</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <img
-            src="https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png"
-            alt="Windy"
-            style={{ width: 12, height: 20 }}
-          />
+          <img src="https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png" alt="Windy" style={{ width: 12, height: 20 }} />
           Windy ({windyCams.length})
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <img
-            src="https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png"
-            alt="Skyline"
-            style={{ width: 12, height: 20 }}
-          />
+          <img src="https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png" alt="Skyline" style={{ width: 12, height: 20 }} />
           Skyline ({skylineCams.length})
         </div>
       </div>
 
-      {/* Loading indicator */}
+      {/* Loading */}
       {loading && (
-        <div
-          style={{
-            position: 'absolute',
-            top: 12,
-            left: 12,
-            zIndex: 1000,
-            padding: '8px 14px',
-            background: 'rgba(11,18,32,0.88)',
-            color: '#fff',
-            borderRadius: 8,
-            fontSize: 13,
-            backdropFilter: 'blur(6px)',
-          }}
-        >
+        <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 1000, padding: '8px 14px', background: 'rgba(11,18,32,0.88)', color: '#fff', borderRadius: 8, fontSize: 13, backdropFilter: 'blur(6px)' }}>
           Loading webcams…
         </div>
       )}
 
-      {/* Non-fatal error banners (map still renders) */}
-      {errors.length > 0 && (
-        <div
-          style={{
-            position: 'absolute',
-            top: 12,
-            left: 12,
-            zIndex: 1000,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 6,
-          }}
-        >
-          {errors.map((msg, i) => (
-            <div
-              key={i}
-              style={{
-                padding: '8px 14px',
-                background: 'rgba(161,44,68,0.9)',
-                color: '#fff',
-                borderRadius: 8,
-                fontSize: 12,
-                maxWidth: 340,
-              }}
-            >
-              ⚠ {msg}
-            </div>
-          ))}
+      {/* Errors — non-fatal, map still renders */}
+      {errors.map((msg, i) => (
+        <div key={i} style={{ position: 'absolute', top: 12 + i * 44, left: 12, zIndex: 1000, padding: '8px 14px', background: 'rgba(161,44,68,0.9)', color: '#fff', borderRadius: 8, fontSize: 12, maxWidth: 340 }}>
+          ⚠ {msg}
         </div>
-      )}
+      ))}
     </main>
   );
 }

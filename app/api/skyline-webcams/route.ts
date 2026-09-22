@@ -7,12 +7,12 @@ export async function POST(request: Request) {
   const token = process.env.APIFY_TOKEN;
   if (!token) {
     return NextResponse.json(
-      { error: 'APIFY_TOKEN not configured' },
+      { error: 'APIFY_TOKEN not configured — add it to .env.local' },
       { status: 500 }
     );
   }
 
-  let body: any = {};
+  let body: { location?: string; startUrls?: string[] } = {};
   try {
     body = await request.json();
   } catch {
@@ -25,9 +25,7 @@ export async function POST(request: Request) {
   const input = {
     location,
     startUrls,
-    proxyConfiguration: {
-      useApifyProxy: true,
-    },
+    proxyConfiguration: { useApifyProxy: true },
   };
 
   const url = `${APIFY_API_BASE}/${ACTOR_ID}/run-sync-get-dataset-items?token=${encodeURIComponent(token)}`;
@@ -35,9 +33,7 @@ export async function POST(request: Request) {
   try {
     const res = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ input }),
     });
 
@@ -49,11 +45,13 @@ export async function POST(request: Request) {
       );
     }
 
-    const items = await res.json();
-    return NextResponse.json(items, { status: 200 });
-  } catch (err: any) {
+    const items: unknown = await res.json();
+    // Always return an array — never let a non-array reach the client
+    const safeItems = Array.isArray(items) ? items : [];
+    return NextResponse.json(safeItems, { status: 200 });
+  } catch (err: unknown) {
     return NextResponse.json(
-      { error: 'Network or fetch error', message: err?.message },
+      { error: 'Network error', message: err instanceof Error ? err.message : String(err) },
       { status: 500 }
     );
   }

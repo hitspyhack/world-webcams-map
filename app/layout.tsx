@@ -2,7 +2,7 @@ import './globals.css';
 
 export const metadata = {
   title: 'World Webcams Map',
-  description: 'Windy + Skyline webcam world map — hitspyhack',
+  description: 'Windy + Skyline webcam world map',
 };
 
 export default function RootLayout({
