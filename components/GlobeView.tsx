@@ -2,11 +2,6 @@
 
 import { useEffect, useRef, useCallback } from 'react';
 
-// ---------------------------------------------------------------------------
-// Types — mirrors the d3-geo + topojson-client APIs we actually call.
-// Both libs are loaded at runtime via CDN <script> tags (no npm install needed)
-// and accessed through window.d3 / window.topojson.
-// ---------------------------------------------------------------------------
 declare global {
   interface Window {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -14,29 +9,6 @@ declare global {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     topojson: any;
   }
-}
-
-interface GeoProjection {
-  (coord: [number, number]): [number, number] | null;
-  rotate(): [number, number, number];
-  rotate(angles: [number, number, number]): this;
-  scale(s: number): this;
-  translate(t: [number, number]): this;
-  clipAngle(a: number): this;
-  precision(p: number): this;
-}
-
-interface GeoPathGenerator {
-  context(ctx: CanvasRenderingContext2D): GeoPathGenerator;
-  projection(proj: GeoProjection): GeoPathGenerator;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (obj: any): void;
-}
-
-interface D3Geo {
-  geoOrthographic(): GeoProjection;
-  geoPath(): GeoPathGenerator;
-  geoGraticule(): () => unknown;
 }
 
 export interface GlobeCam {
@@ -54,27 +26,29 @@ interface Props {
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-const SPIN_SPEED    = 0.12;
-const TILT          = -15;
-const DOT_RADIUS    = 3;
-const HOVER_RADIUS  = 6;
-const FPS_CAP       = 40;
-const FRAME_MS      = 1000 / FPS_CAP;
+const SPIN_SPEED   = 0.12;
+const TILT         = -15;
+const DOT_RADIUS   = 3;
+const HOVER_RADIUS = 6;
+const FPS_CAP      = 40;
+const FRAME_MS     = 1000 / FPS_CAP;
 
-const TOPO_URL      = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json';
-const D3_CDN        = 'https://cdn.jsdelivr.net/npm/d3-geo@3/dist/d3-geo.min.js';
-const TOPOJSON_CDN  = 'https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js';
+const TOPO_URL     = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json';
+// Full d3@7 UMD bundle — sets window.d3 reliably; well-tested CDN path
+const D3_CDN       = 'https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js';
+const TOPO_CDN     = 'https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js';
 
 // ---------------------------------------------------------------------------
-// Helpers
+// CDN loader — injects a <script> tag once, resolves on load
 // ---------------------------------------------------------------------------
 function loadScript(src: string): Promise<void> {
   return new Promise((resolve, reject) => {
     if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
-    const s = document.createElement('script');
-    s.src = src;
-    s.onload  = () => resolve();
-    s.onerror = () => reject(new Error(`Failed to load ${src}`));
+    const s = Object.assign(document.createElement('script'), {
+      src,
+      onload:  resolve,
+      onerror: () => reject(new Error(`Script load failed: ${src}`)),
+    });
     document.head.appendChild(s);
   });
 }
@@ -91,37 +65,22 @@ export default function GlobeView({ cams, onEnterMap }: Props) {
   const lastFrameRef = useRef(0);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const topoRef      = useRef<any>(null);
-  const d3Ref        = useRef<D3Geo | null>(null);
-  const projRef      = useRef<GeoProjection | null>(null);
+  const readyRef     = useRef(false);   // true once libs + topo loaded
+  const projRef      = useRef<((c: [number, number]) => [number, number] | null) | null>(null);
   const hoveredRef   = useRef<GlobeCam | null>(null);
   const tooltipRef   = useRef<HTMLDivElement | null>(null);
 
-  // ── Load libs + TopoJSON via CDN, then start the loop ──────────────────
-  useEffect(() => {
-    let cancelled = false;
-    Promise.all([
-      loadScript(D3_CDN),
-      loadScript(TOPOJSON_CDN),
-      fetch(TOPO_URL).then(r => r.json()),
-    ]).then(([, , world]) => {
-      if (cancelled) return;
-      d3Ref.current   = window.d3 as D3Geo;
-      topoRef.current = window.topojson.feature(world, world.objects.countries);
-      startLoop();
-    }).catch(console.error);
-    return () => {
-      cancelled = true;
-      cancelAnimationFrame(rafRef.current);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // ── Render loop ─────────────────────────────────────────────────────────
+  // ---------------------------------------------------------------------------
+  // Draw one frame
+  // ---------------------------------------------------------------------------
   const draw = useCallback((now: number) => {
     const canvas = canvasRef.current;
-    const d3     = d3Ref.current;
-    if (!canvas || !d3) return;
+    if (!canvas || !readyRef.current) {
+      rafRef.current = requestAnimationFrame(draw);
+      return;
+    }
 
+    // FPS cap
     if (now - lastFrameRef.current < FRAME_MS) {
       rafRef.current = requestAnimationFrame(draw);
       return;
@@ -130,13 +89,23 @@ export default function GlobeView({ cams, onEnterMap }: Props) {
 
     const W = canvas.width;
     const H = canvas.height;
+    // Guard: canvas not yet sized (offsetWidth=0 at first mount)
+    if (W === 0 || H === 0) {
+      rafRef.current = requestAnimationFrame(draw);
+      return;
+    }
+
     const cx = W / 2;
     const cy = H / 2;
     const radius = Math.min(W, H) * 0.42;
 
+    // Auto-spin
     if (!pauseRef.current && !dragRef.current.active) {
       rotRef.current = [rotRef.current[0] + SPIN_SPEED, TILT, 0];
     }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const d3 = window.d3 as any;
 
     const proj = d3.geoOrthographic()
       .scale(radius)
@@ -146,14 +115,13 @@ export default function GlobeView({ cams, onEnterMap }: Props) {
       .precision(0.5);
     projRef.current = proj;
 
-    const pathGen = d3.geoPath().projection(proj).context(
-      canvas.getContext('2d')!
-    );
-
     const ctx = canvas.getContext('2d')!;
+    const pathGen = d3.geoPath().projection(proj).context(ctx);
+
     ctx.clearRect(0, 0, W, H);
 
     // Ocean
+    ctx.save();
     ctx.beginPath();
     ctx.arc(cx, cy, radius, 0, 2 * Math.PI);
     const ocean = ctx.createRadialGradient(cx - radius * 0.3, cy - radius * 0.3, 0, cx, cy, radius);
@@ -162,16 +130,20 @@ export default function GlobeView({ cams, onEnterMap }: Props) {
     ocean.addColorStop(1,   '#040e16');
     ctx.fillStyle = ocean;
     ctx.fill();
+    ctx.restore();
 
     // Graticule
+    ctx.save();
     ctx.beginPath();
     pathGen(d3.geoGraticule()());
     ctx.strokeStyle = 'rgba(30,60,80,0.55)';
     ctx.lineWidth   = 0.4;
     ctx.stroke();
+    ctx.restore();
 
     // Land
     if (topoRef.current) {
+      ctx.save();
       ctx.beginPath();
       pathGen(topoRef.current);
       ctx.fillStyle   = '#1a3d2b';
@@ -179,95 +151,141 @@ export default function GlobeView({ cams, onEnterMap }: Props) {
       ctx.lineWidth   = 0.6;
       ctx.fill();
       ctx.stroke();
+      ctx.restore();
     }
 
     // Globe rim
+    ctx.save();
     ctx.beginPath();
     ctx.arc(cx, cy, radius, 0, 2 * Math.PI);
-    ctx.strokeStyle = 'rgba(0,200,120,0.18)';
+    ctx.strokeStyle = 'rgba(0,200,120,0.25)';
     ctx.lineWidth   = 1.5;
     ctx.stroke();
+    ctx.restore();
 
     // Cam dots
     const hov = hoveredRef.current;
     for (const cam of cams) {
       const pt = proj([cam.lon, cam.lat]);
       if (!pt) continue;
-      const [px, py] = pt;
+      const [px, py] = pt as [number, number];
       const dx = px - cx, dy = py - cy;
+      // Skip dots on the back hemisphere
       if (dx * dx + dy * dy > radius * radius * 1.01) continue;
 
       const isHov = hov === cam;
-      const r = isHov ? HOVER_RADIUS : DOT_RADIUS;
+      const r     = isHov ? HOVER_RADIUS : DOT_RADIUS;
 
+      ctx.save();
+      // Shadow drop
       ctx.beginPath();
       ctx.arc(px, py, r + 1.5, 0, 2 * Math.PI);
       ctx.fillStyle = 'rgba(0,0,0,0.4)';
       ctx.fill();
-
+      // Glow dot
       ctx.beginPath();
       ctx.arc(px, py, r, 0, 2 * Math.PI);
       ctx.fillStyle   = isHov ? '#ffffff' : cam.color;
       ctx.shadowColor = cam.color;
-      ctx.shadowBlur  = isHov ? 10 : 4;
+      ctx.shadowBlur  = isHov ? 12 : 5;
       ctx.fill();
-      ctx.shadowBlur  = 0;
+      ctx.restore();
     }
 
-    // Atmosphere glow
-    const atm = ctx.createRadialGradient(cx, cy, radius * 0.95, cx, cy, radius * 1.12);
-    atm.addColorStop(0, 'rgba(0,220,120,0.08)');
+    // Atmosphere glow (drawn last so it overlays the rim)
+    ctx.save();
+    const atm = ctx.createRadialGradient(cx, cy, radius * 0.92, cx, cy, radius * 1.15);
+    atm.addColorStop(0, 'rgba(0,220,120,0.10)');
     atm.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.beginPath();
-    ctx.arc(cx, cy, radius * 1.12, 0, 2 * Math.PI);
+    ctx.arc(cx, cy, radius * 1.15, 0, 2 * Math.PI);
     ctx.fillStyle = atm;
     ctx.fill();
+    ctx.restore();
 
     rafRef.current = requestAnimationFrame(draw);
   }, [cams]);
 
+  // ---------------------------------------------------------------------------
+  // Start / restart loop
+  // ---------------------------------------------------------------------------
   const startLoop = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
     rafRef.current = requestAnimationFrame(draw);
   }, [draw]);
 
+  // ---------------------------------------------------------------------------
+  // Load CDN libs + TopoJSON, THEN start loop
+  // Must run after the ResizeObserver has had a chance to size the canvas;
+  // we defer via a microtask so both effects settle first.
+  // ---------------------------------------------------------------------------
   useEffect(() => {
-    if (d3Ref.current) startLoop();
+    let cancelled = false;
+    Promise.all([
+      loadScript(D3_CDN),
+      loadScript(TOPO_CDN),
+      fetch(TOPO_URL).then(r => r.json()),
+    ]).then(([, , world]) => {
+      if (cancelled) return;
+      topoRef.current = window.topojson.feature(world, world.objects.countries);
+      readyRef.current = true;
+      // Small setTimeout so the ResizeObserver sync() has already fired
+      setTimeout(startLoop, 0);
+    }).catch(console.error);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(rafRef.current);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Re-kick when cams update (only if already ready)
+  useEffect(() => {
+    if (readyRef.current) startLoop();
   }, [cams, startLoop]);
 
-  // ── Resize ──────────────────────────────────────────────────────────────
+  // ---------------------------------------------------------------------------
+  // Resize — sync canvas backing-store size to display size
+  // ---------------------------------------------------------------------------
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const sync = () => {
-      canvas.width  = canvas.offsetWidth  * window.devicePixelRatio;
-      canvas.height = canvas.offsetHeight * window.devicePixelRatio;
+      const dpr = window.devicePixelRatio || 1;
+      const w   = canvas.offsetWidth;
+      const h   = canvas.offsetHeight;
+      if (w === 0 || h === 0) return;   // not laid out yet
+      canvas.width  = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
     };
     const ro = new ResizeObserver(sync);
     ro.observe(canvas);
+    // Also run once immediately in case offsetWidth is already available
     sync();
     return () => ro.disconnect();
   }, []);
 
-  // ── Pointer helpers ──────────────────────────────────────────────────────
+  // ---------------------------------------------------------------------------
+  // Hit-test: find closest cam to pointer position
+  // ---------------------------------------------------------------------------
   const getCamAt = useCallback((ex: number, ey: number): GlobeCam | null => {
     const canvas = canvasRef.current;
     const proj   = projRef.current;
     if (!canvas || !proj) return null;
-    const rect = canvas.getBoundingClientRect();
-    const sx = canvas.width  / rect.width;
-    const sy = canvas.height / rect.height;
-    const mx = (ex - rect.left) * sx;
-    const my = (ey - rect.top)  * sy;
-    const cx = canvas.width  / 2;
-    const cy = canvas.height / 2;
+    const rect   = canvas.getBoundingClientRect();
+    const sx     = canvas.width  / rect.width;
+    const sy     = canvas.height / rect.height;
+    const mx     = (ex - rect.left) * sx;
+    const my     = (ey - rect.top)  * sy;
+    const cx     = canvas.width  / 2;
+    const cy     = canvas.height / 2;
     const radius = Math.min(canvas.width, canvas.height) * 0.42;
     let best: GlobeCam | null = null;
     let bestDist = HOVER_RADIUS * 3;
     for (const cam of cams) {
       const pt = proj([cam.lon, cam.lat]);
       if (!pt) continue;
-      const [px, py] = pt;
+      const [px, py] = pt as [number, number];
       if ((px - cx) ** 2 + (py - cy) ** 2 > radius * radius * 1.01) continue;
       const d = Math.hypot(px - mx, py - my);
       if (d < bestDist) { bestDist = d; best = cam; }
@@ -275,6 +293,9 @@ export default function GlobeView({ cams, onEnterMap }: Props) {
     return best;
   }, [cams]);
 
+  // ---------------------------------------------------------------------------
+  // Pointer / touch event handlers
+  // ---------------------------------------------------------------------------
   const onMouseMove = useCallback((e: React.MouseEvent) => {
     if (dragRef.current.active) {
       const dx = e.clientX - dragRef.current.x;
@@ -307,7 +328,7 @@ export default function GlobeView({ cams, onEnterMap }: Props) {
     dragRef.current = { active: true, x: e.clientX, y: e.clientY };
     pauseRef.current = true;
   }, []);
-  const onMouseUp    = useCallback(() => { dragRef.current.active = false; }, []);
+  const onMouseUp = useCallback(() => { dragRef.current.active = false; }, []);
   const onMouseLeave = useCallback(() => {
     dragRef.current.active = false;
     pauseRef.current = false;
@@ -326,7 +347,7 @@ export default function GlobeView({ cams, onEnterMap }: Props) {
     lastTouchRef.current = { x: t.clientX, y: t.clientY };
   }, []);
   const onTouchMove = useCallback((e: React.TouchEvent) => {
-    const t = e.touches[0], prev = lastTouchRef.current;
+    const t = e.touches[0]; const prev = lastTouchRef.current;
     if (!prev) return;
     rotRef.current = [
       rotRef.current[0] + (t.clientX - prev.x) * 0.5,
@@ -340,9 +361,13 @@ export default function GlobeView({ cams, onEnterMap }: Props) {
     lastTouchRef.current = null;
   }, []);
 
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
   return (
     <div style={{ position: 'relative', width: '100vw', height: '100vh', background: '#04080f', overflow: 'hidden' }}>
-      {/* Scanline overlay */}
+
+      {/* CSS scanline overlay — OSINT aesthetic, zero JS */}
       <div style={{
         position: 'absolute', inset: 0, zIndex: 1, pointerEvents: 'none',
         backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,255,100,0.018) 2px, rgba(0,255,100,0.018) 4px)',
@@ -362,7 +387,7 @@ export default function GlobeView({ cams, onEnterMap }: Props) {
         onTouchEnd={onTouchEnd}
       />
 
-      {/* HUD */}
+      {/* HUD — top-center */}
       <div style={{
         position: 'absolute', top: 20, left: '50%', transform: 'translateX(-50%)',
         zIndex: 10, textAlign: 'center', pointerEvents: 'none',
@@ -376,6 +401,7 @@ export default function GlobeView({ cams, onEnterMap }: Props) {
         </div>
       </div>
 
+      {/* Enter map CTA */}
       <button
         onClick={onEnterMap}
         style={{
@@ -386,7 +412,7 @@ export default function GlobeView({ cams, onEnterMap }: Props) {
           borderRadius: 6, color: 'rgba(0,220,100,0.95)',
           fontFamily: 'monospace', fontSize: 13, letterSpacing: '0.15em',
           cursor: 'pointer', boxShadow: '0 0 18px rgba(0,200,80,0.15)',
-          transition: 'all 0.2s',
+          transition: 'background 0.2s',
         }}
         onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,50,30,0.95)')}
         onMouseLeave={e => (e.currentTarget.style.background = 'rgba(0,30,20,0.85)')}
@@ -402,6 +428,7 @@ export default function GlobeView({ cams, onEnterMap }: Props) {
         DRAG TO ROTATE · CLICK DOT TO ENTER
       </div>
 
+      {/* Cam tooltip */}
       <div
         ref={tooltipRef}
         style={{
