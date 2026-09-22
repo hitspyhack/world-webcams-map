@@ -43,20 +43,25 @@ interface SkylineItem {
   country?: string;
 }
 
+/** Safely coerce any API response to an array of T */
+function toArray<T>(val: unknown): T[] {
+  if (Array.isArray(val)) return val as T[];
+  return [];
+}
+
 // --- Component ---
 
 export default function LeafletMap() {
   const [windyCams, setWindyCams] = useState<WindyWebcam[]>([]);
   const [skylineCams, setSkylineCams] = useState<SkylineItem[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [errors, setErrors] = useState<string[]>([]);
 
   // Blue marker — Windy
   const windyIcon = useMemo(
     () =>
       new L.Icon({
-        iconUrl:
-          'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+        iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
         iconRetinaUrl:
           'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
         shadowUrl:
@@ -88,39 +93,52 @@ export default function LeafletMap() {
   );
 
   useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        // Windy — world bounding box
-        const windyRes = await fetch(
-          '/api/windy-webcams?bbox=90,180,-90,-180'
-        );
-        if (!windyRes.ok) throw new Error(`Windy API error: ${windyRes.status}`);
-        const windyJson = await windyRes.json();
-        const webcams: WindyWebcam[] =
-          windyJson.webcams ?? windyJson.result?.webcams ?? [];
-        setWindyCams(webcams);
+    const errs: string[] = [];
 
-        // Skyline — default location Rome (can be made dynamic later)
-        const skylineRes = await fetch('/api/skyline-webcams', {
+    const fetchAll = async () => {
+      setLoading(true);
+      setErrors([]);
+
+      // --- Windy ---
+      try {
+        const res = await fetch('/api/windy-webcams?bbox=90,180,-90,-180');
+        const json = await res.json();
+        if (!res.ok) {
+          errs.push(`Windy: ${json?.error ?? res.statusText}`);
+        } else {
+          const cams = toArray<WindyWebcam>(
+            json.webcams ?? json.result?.webcams
+          );
+          setWindyCams(cams);
+        }
+      } catch (e: unknown) {
+        errs.push(`Windy network error: ${e instanceof Error ? e.message : e}`);
+      }
+
+      // --- Skyline ---
+      try {
+        const res = await fetch('/api/skyline-webcams', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ location: 'Rome' }),
         });
-        if (!skylineRes.ok)
-          throw new Error(`Skyline API error: ${skylineRes.status}`);
-        const skylineJson = await skylineRes.json();
-        setSkylineCams(Array.isArray(skylineJson) ? skylineJson : []);
+        const json = await res.json();
+        if (!res.ok) {
+          errs.push(`Skyline: ${json?.error ?? res.statusText}`);
+        } else {
+          setSkylineCams(toArray<SkylineItem>(json));
+        }
       } catch (e: unknown) {
-        console.error('Failed to load webcam data:', e);
-        setError(e instanceof Error ? e.message : 'Failed to load webcams');
-      } finally {
-        setLoading(false);
+        errs.push(
+          `Skyline network error: ${e instanceof Error ? e.message : e}`
+        );
       }
+
+      setErrors(errs);
+      setLoading(false);
     };
 
-    fetchData();
+    fetchAll();
   }, []);
 
   return (
@@ -252,7 +270,7 @@ export default function LeafletMap() {
           bottom: 24,
           right: 12,
           zIndex: 1000,
-          background: 'rgba(11,18,32,0.85)',
+          background: 'rgba(11,18,32,0.88)',
           color: '#fff',
           borderRadius: 8,
           padding: '10px 14px',
@@ -269,7 +287,7 @@ export default function LeafletMap() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <img
             src="https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png"
-            alt="Windy marker"
+            alt="Windy"
             style={{ width: 12, height: 20 }}
           />
           Windy ({windyCams.length})
@@ -277,7 +295,7 @@ export default function LeafletMap() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <img
             src="https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png"
-            alt="Skyline marker"
+            alt="Skyline"
             style={{ width: 12, height: 20 }}
           />
           Skyline ({skylineCams.length})
@@ -293,7 +311,7 @@ export default function LeafletMap() {
             left: 12,
             zIndex: 1000,
             padding: '8px 14px',
-            background: 'rgba(11,18,32,0.85)',
+            background: 'rgba(11,18,32,0.88)',
             color: '#fff',
             borderRadius: 8,
             fontSize: 13,
@@ -304,22 +322,34 @@ export default function LeafletMap() {
         </div>
       )}
 
-      {/* Error banner */}
-      {error && (
+      {/* Non-fatal error banners (map still renders) */}
+      {errors.length > 0 && (
         <div
           style={{
             position: 'absolute',
             top: 12,
             left: 12,
             zIndex: 1000,
-            padding: '8px 14px',
-            background: 'rgba(161,44,68,0.9)',
-            color: '#fff',
-            borderRadius: 8,
-            fontSize: 13,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
           }}
         >
-          ⚠ {error}
+          {errors.map((msg, i) => (
+            <div
+              key={i}
+              style={{
+                padding: '8px 14px',
+                background: 'rgba(161,44,68,0.9)',
+                color: '#fff',
+                borderRadius: 8,
+                fontSize: 12,
+                maxWidth: 340,
+              }}
+            >
+              ⚠ {msg}
+            </div>
+          ))}
         </div>
       )}
     </main>
