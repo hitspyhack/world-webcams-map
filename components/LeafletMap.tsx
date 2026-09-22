@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import L, { Map as LeafletMap } from 'leaflet';
+import { useEffect, useMemo, useState } from 'react';
+import L from 'leaflet';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 
 // ---- Types ----
@@ -49,7 +49,6 @@ export default function LeafletMap() {
   const [skylineCams, setSkylineCams] = useState<SkylineItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
-  const mapRef = useRef<LeafletMap | null>(null);
 
   const windyIcon = useMemo(
     () =>
@@ -78,16 +77,6 @@ export default function LeafletMap() {
       }),
     []
   );
-
-  // Cleanup map instance on unmount (fixes Strict Mode double-mount)
-  useEffect(() => {
-    return () => {
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
-      }
-    };
-  }, []);
 
   useEffect(() => {
     const fetchAll = async () => {
@@ -139,7 +128,6 @@ export default function LeafletMap() {
         zoom={2}
         scrollWheelZoom
         style={{ height: '100%', width: '100%' }}
-        ref={mapRef}
       >
         <TileLayer
           attribution="&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> contributors"
@@ -164,17 +152,36 @@ export default function LeafletMap() {
                 </span>
                 {preview && (
                   <div style={{ marginTop: 8 }}>
-                    <img src={preview} alt={cam.title ?? 'Webcam'} style={{ maxWidth: 240, borderRadius: 6 }} loading="lazy" />
+                    <img
+                      src={preview}
+                      alt={cam.title ?? 'Webcam'}
+                      style={{ maxWidth: 240, borderRadius: 6 }}
+                      loading="lazy"
+                    />
                   </div>
                 )}
                 {cam.urls?.player && (
                   <div style={{ marginTop: 8 }}>
-                    <iframe src={cam.urls.player} title="timelapse" width="240" height="135" loading="lazy" style={{ border: 0, borderRadius: 6 }} />
+                    <iframe
+                      src={cam.urls.player}
+                      title="timelapse"
+                      width="240"
+                      height="135"
+                      loading="lazy"
+                      style={{ border: 0, borderRadius: 6 }}
+                    />
                   </div>
                 )}
                 {cam.urls?.webcam && (
                   <div style={{ marginTop: 6 }}>
-                    <a href={cam.urls.webcam} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12 }}>Open on Windy ↗</a>
+                    <a
+                      href={cam.urls.webcam}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ fontSize: 12 }}
+                    >
+                      Open on Windy ↗
+                    </a>
                   </div>
                 )}
               </Popup>
@@ -189,7 +196,11 @@ export default function LeafletMap() {
           const { lat, lon } = gps;
           if (lat == null || lon == null) return null;
           return (
-            <Marker key={`skyline-${cam.id ?? cam.url ?? `${lat}-${lon}`}`} position={[lat, lon]} icon={skylineIcon}>
+            <Marker
+              key={`skyline-${cam.id ?? cam.url ?? `${lat}-${lon}`}`}
+              position={[lat, lon]}
+              icon={skylineIcon}
+            >
               <Popup maxWidth={260}>
                 <strong>{cam.title ?? 'Skyline webcam'}</strong>
                 <br />
@@ -198,12 +209,24 @@ export default function LeafletMap() {
                 </span>
                 {cam.snapshotUrl && (
                   <div style={{ marginTop: 8 }}>
-                    <img src={cam.snapshotUrl} alt={cam.title ?? 'Skyline'} style={{ maxWidth: 240, borderRadius: 6 }} loading="lazy" />
+                    <img
+                      src={cam.snapshotUrl}
+                      alt={cam.title ?? 'Skyline'}
+                      style={{ maxWidth: 240, borderRadius: 6 }}
+                      loading="lazy"
+                    />
                   </div>
                 )}
                 {cam.url && (
                   <div style={{ marginTop: 6 }}>
-                    <a href={cam.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12 }}>Open on Skyline ↗</a>
+                    <a
+                      href={cam.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ fontSize: 12 }}
+                    >
+                      Open on Skyline ↗
+                    </a>
                   </div>
                 )}
               </Popup>
@@ -213,28 +236,79 @@ export default function LeafletMap() {
       </MapContainer>
 
       {/* Legend */}
-      <div style={{ position: 'absolute', bottom: 24, right: 12, zIndex: 1000, background: 'rgba(11,18,32,0.88)', color: '#fff', borderRadius: 8, padding: '10px 14px', fontSize: 12, display: 'flex', flexDirection: 'column', gap: 6, backdropFilter: 'blur(6px)' }}>
+      <div
+        style={{
+          position: 'absolute',
+          bottom: 24,
+          right: 12,
+          zIndex: 1000,
+          background: 'rgba(11,18,32,0.88)',
+          color: '#fff',
+          borderRadius: 8,
+          padding: '10px 14px',
+          fontSize: 12,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 6,
+          backdropFilter: 'blur(6px)',
+        }}
+      >
         <div style={{ fontWeight: 700, marginBottom: 4, fontSize: 13 }}>World Webcams Map</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <img src="https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png" alt="Windy" style={{ width: 12, height: 20 }} />
+          <img
+            src="https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png"
+            alt="Windy"
+            style={{ width: 12, height: 20 }}
+          />
           Windy ({windyCams.length})
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <img src="https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png" alt="Skyline" style={{ width: 12, height: 20 }} />
+          <img
+            src="https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png"
+            alt="Skyline"
+            style={{ width: 12, height: 20 }}
+          />
           Skyline ({skylineCams.length})
         </div>
       </div>
 
       {/* Loading */}
       {loading && (
-        <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 1000, padding: '8px 14px', background: 'rgba(11,18,32,0.88)', color: '#fff', borderRadius: 8, fontSize: 13, backdropFilter: 'blur(6px)' }}>
+        <div
+          style={{
+            position: 'absolute',
+            top: 12,
+            left: 12,
+            zIndex: 1000,
+            padding: '8px 14px',
+            background: 'rgba(11,18,32,0.88)',
+            color: '#fff',
+            borderRadius: 8,
+            fontSize: 13,
+            backdropFilter: 'blur(6px)',
+          }}
+        >
           Loading webcams…
         </div>
       )}
 
       {/* Errors — non-fatal, map still renders */}
       {errors.map((msg, i) => (
-        <div key={i} style={{ position: 'absolute', top: 12 + i * 44, left: 12, zIndex: 1000, padding: '8px 14px', background: 'rgba(161,44,68,0.9)', color: '#fff', borderRadius: 8, fontSize: 12, maxWidth: 340 }}>
+        <div
+          key={i}
+          style={{
+            position: 'absolute',
+            top: 12 + i * 44,
+            left: 12,
+            zIndex: 1000,
+            padding: '8px 14px',
+            background: 'rgba(161,44,68,0.9)',
+            color: '#fff',
+            borderRadius: 8,
+            fontSize: 12,
+            maxWidth: 340,
+          }}
+        >
           ⚠ {msg}
         </div>
       ))}
