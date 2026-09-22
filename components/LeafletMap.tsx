@@ -30,9 +30,51 @@ function makeIcon(url: string) {
   return new L.Icon({ iconUrl: url, iconRetinaUrl: url.replace('.png', '-2x.png'), shadowUrl: SHADOW_URL, iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41] });
 }
 
-const DARK_TILE_URL    = 'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png';
-const DARK_TILE_LABELS = 'https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png';
-const CARTO_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions" target="_blank">CARTO</a>';
+// ---------------------------------------------------------------------------
+// 100% free, zero-API-key tile sources
+//
+// Strategy: serve plain OpenStreetMap tiles, then CSS-invert ONLY the tile
+// pane so the map goes dark. Markers, popups, and the legend are excluded
+// from the inversion by targeting .leaflet-tile-pane specifically.
+//
+// The hue-rotate(180deg) after invert() turns the washed-out yellow/orange
+// landmass into the green-tinted phosphor look typical of OSINT dashboards.
+// ---------------------------------------------------------------------------
+const OSM_URL  = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+const OSM_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> contributors';
+
+// Tile-pane CSS filter — applied globally via an injected <style> tag.
+// We invert the tile pane only; markers and popups keep their true colours.
+const TILE_FILTER_CSS = `
+  .leaflet-tile-pane {
+    filter: invert(1) hue-rotate(180deg) brightness(0.78) contrast(1.08) saturate(0.75);
+  }
+  /* Keep popup content readable against the inverted background */
+  .leaflet-popup-content-wrapper,
+  .leaflet-popup-tip {
+    background: rgba(13,17,23,0.97) !important;
+    color: #e6edf3 !important;
+    border: 1px solid #30363d !important;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.7) !important;
+  }
+  .leaflet-popup-content a { color: #79c0ff; }
+  /* Leaflet attribution bar */
+  .leaflet-control-attribution {
+    background: rgba(13,17,23,0.85) !important;
+    color: #484f58 !important;
+  }
+  .leaflet-control-attribution a { color: #30363d !important; }
+  /* Zoom buttons */
+  .leaflet-control-zoom a {
+    background: rgba(22,27,34,0.95) !important;
+    color: #8b949e !important;
+    border-color: #30363d !important;
+  }
+  .leaflet-control-zoom a:hover {
+    background: rgba(48,54,61,0.95) !important;
+    color: #e6edf3 !important;
+  }
+`;
 
 // ── Shared popup preview image ──────────────────────────────────────────────
 function PreviewImg({ src, alt }: { src: string; alt: string }) {
@@ -96,6 +138,17 @@ export default function LeafletMap() {
     const r = {} as Record<SourceKey, L.Icon>;
     for (const [k, cfg] of Object.entries(SOURCE_CONFIG)) r[k as SourceKey] = makeIcon(cfg.markerUrl);
     return r;
+  }, []);
+
+  // Inject tile-filter CSS once on mount
+  useEffect(() => {
+    const id = 'osint-tile-filter';
+    if (document.getElementById(id)) return;
+    const el = document.createElement('style');
+    el.id = id;
+    el.textContent = TILE_FILTER_CSS;
+    document.head.appendChild(el);
+    return () => { document.getElementById(id)?.remove(); };
   }, []);
 
   useEffect(() => {
@@ -173,10 +226,14 @@ export default function LeafletMap() {
   );
 
   return (
-    <main style={{ height: '100vh', width: '100vw', position: 'relative', fontFamily: 'system-ui, sans-serif', background: '#0d1117' }}>
-      <MapContainer center={[20, 0]} zoom={2} scrollWheelZoom style={{ height: '100%', width: '100%', background: '#0d1117' }}>
-        <TileLayer attribution={CARTO_ATTR} url={DARK_TILE_URL} />
-        <TileLayer url={DARK_TILE_LABELS} />
+    <main style={{ height: '100vh', width: '100vw', position: 'relative', fontFamily: 'system-ui, sans-serif', background: '#0a0c0f' }}>
+      <MapContainer center={[20, 0]} zoom={2} scrollWheelZoom style={{ height: '100%', width: '100%', background: '#0a0c0f' }}>
+        {/* Single OSM tile layer — darkened via CSS filter on .leaflet-tile-pane */}
+        <TileLayer
+          attribution={OSM_ATTR}
+          url={OSM_URL}
+          maxZoom={19}
+        />
 
         {/* ── Windy ── */}
         <WindyLayer enabled={visible.windy} onCountChange={handleWindyCount} debounceMs={600} limit={50} />
