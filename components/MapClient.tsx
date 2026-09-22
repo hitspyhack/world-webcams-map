@@ -2,6 +2,7 @@
 
 import dynamic from 'next/dynamic';
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import type { GlobeViewHandle } from './GlobeView';
 import type { GlobeCam } from './GlobeView';
 import { ASIA_SOURCES } from './AsiaWebcamsLayer';
 import { EU_COUNTRIES } from './EUTrafficLayer';
@@ -63,7 +64,7 @@ interface AsiaCam {
   country?: string; city?: string; sourceCountry?: string;
 }
 
-// ─── Country centroids ─────────────────────────────────────────────────────────────────
+// ─── Country centroids ────────────────────────────────────────────────────────
 const COUNTRY_CENTROIDS: Record<string, { name: string; lat: number; lon: number }> = {
   AD:{name:'Andorra',lat:42.55,lon:1.60},AE:{name:'United Arab Emirates',lat:23.42,lon:53.85},
   AF:{name:'Afghanistan',lat:33.93,lon:67.71},AG:{name:'Antigua and Barbuda',lat:17.06,lon:-61.80},
@@ -164,17 +165,12 @@ const COUNTRY_CENTROIDS: Record<string, { name: string; lat: number; lon: number
   ZW:{name:'Zimbabwe',lat:-19.02,lon:29.15},
 };
 
-// Country bounding-box radii (degrees). Larger countries get a wider box.
 const COUNTRY_BBOX_RADIUS: Record<string, number> = {
   RU:45, CA:45, US:30, CN:25, BR:25, AU:25, IN:15, AR:20,
   KZ:15, DZ:15, CD:12, SA:12, MX:12, ID:12, SU:12,
 };
-const DEFAULT_BBOX_RADIUS = 6; // degrees lat/lon around centroid
+const DEFAULT_BBOX_RADIUS = 6;
 
-/**
- * Build a "north,east,south,west" bbox string wide enough to cover the whole country.
- * Clamped to world bounds.
- */
 function countryBbox(code: string, lat: number, lon: number): string {
   const r = COUNTRY_BBOX_RADIUS[code] ?? DEFAULT_BBOX_RADIUS;
   const north = Math.min( 90,  lat + r);
@@ -235,6 +231,9 @@ function windyToGlobeCam(c: WindyWebcam): GlobeCam {
 
 export default function MapClient() {
   const [mode, setMode] = useState<'globe' | 'map'>('globe');
+
+  // Ref to GlobeView — used to imperatively rotate the globe on country search
+  const globeRef = useRef<GlobeViewHandle>(null);
 
   const [visible, setVisible] = useState<Record<SourceKey, boolean>>(
     { windy: true, skyline: true, earthcam: true, osm: true, deckchair: true }
@@ -324,6 +323,7 @@ export default function MapClient() {
           const bbox = encodeURIComponent('90,180,-90,-180');
           const r = await fetch(`/api/windy-webcams?bbox=${bbox}&limit=50`);
           const j = await r.json();
+          // missingKey means no Windy API key configured — skip silently
           if (j?.missingKey || !r.ok) return;
           const list: WindyWebcam[] = Array.isArray(j) ? j
             : Array.isArray(j?.webcams) ? j.webcams : [];
@@ -365,12 +365,6 @@ export default function MapClient() {
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
   }, [skylineCams, earthCams, osmCams, deckCams, euCams, asiaCams, windyGlobeCams]);
 
-  /**
-   * Compute a bbox string wide enough to cover the selected country so that
-   * WindyLayer can fetch all Windy cams for that country immediately, without
-   * waiting for the user to pan/zoom.
-   * Null when no country is selected → hook falls back to live map viewport.
-   */
   const windyForceBbox = useMemo(() => {
     if (!countryFilter) return null;
     return countryBbox(countryFilter.code, countryFilter.lat, countryFilter.lon);
@@ -378,8 +372,13 @@ export default function MapClient() {
 
   const handleCountrySelect = useCallback((entry: CountryEntry | null) => {
     setCountryFilter(entry);
-    if (entry && mode === 'map') {
+    if (!entry) return;
+    if (mode === 'map') {
+      // Fly the Leaflet map to the selected country
       setFlyTo({ lat: entry.lat, lon: entry.lon, zoom: 6 });
+    } else {
+      // Rotate the 3-D globe so the selected country faces the viewer
+      globeRef.current?.rotateTo(entry.lon, entry.lat);
     }
   }, [mode]);
 
@@ -491,6 +490,7 @@ export default function MapClient() {
         zIndex: mode === 'globe' ? 2 : 1,
       }}>
         <GlobeView
+          ref={globeRef}
           cams={globeCams}
           totalCount={grandTotal}
           loading={loading}
@@ -566,7 +566,7 @@ export default function MapClient() {
         {mode === 'globe' ? '🗺 MAP' : '🌐 GLOBE'}
       </button>
 
-      {/* Country search — map mode only */}
+      {/* Country search — map mode only (globe has its own inline search) */}
       {mode === 'map' && (
         <CountrySearch
           countries={countryList}

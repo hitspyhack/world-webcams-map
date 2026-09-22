@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useCallback, useState, useImperativeHandle, forwardRef } from 'react';
 import { ASIA_SOURCES } from './AsiaWebcamsLayer';
 import { EU_COUNTRIES } from './EUTrafficLayer';
 import CamLightbox from './CamLightbox';
@@ -27,6 +27,11 @@ export interface GlobeCam {
   embedUrl?: string;
   imageUrl?: string;
   linkUrl?:  string;
+}
+
+/** Methods exposed to the parent via ref */
+export interface GlobeViewHandle {
+  rotateTo: (lon: number, lat: number) => void;
 }
 
 interface Props {
@@ -82,23 +87,18 @@ const SOURCE_BADGE_COLORS: Record<string, string> = {
   osm: '#4ade80', deckchair: '#c084fc', eu: '#818cf8', asia: '#fbbf24',
 };
 
-// Flag emoji for EU countries (private to GlobeView — layer files no longer export these)
+// Flag emoji — private to GlobeView; layer files only export { code: label } strings
 const EU_FLAGS: Record<string, string> = {
-  FI: '\ud83c\uddeb\ud83c\uddee', EE: '\ud83c\uddea\ud83c\uddea', GB: '\ud83c\uddec\ud83c\udde7',
-  SE: '\ud83c\uddf8\ud83c\uddea', NO: '\ud83c\uddf3\ud83c\uddf4', PT: '\ud83c\uddf5\ud83c\uddf9',
-  DE: '\ud83c\udde9\ud83c\uddea', FR: '\ud83c\uddeb\ud83c\uddf7', ES: '\ud83c\uddea\ud83c\uddf8',
-  NL: '\ud83c\uddf3\ud83c\uddf1', AT: '\ud83c\udde6\ud83c\uddf9', CH: '\ud83c\udde8\ud83c\udded',
-  IT: '\ud83c\uddee\ud83c\uddf9', DK: '\ud83c\udde9\ud83c\uddf0', BE: '\ud83c\udde7\ud83c\uddea',
-  PL: '\ud83c\uddf5\ud83c\uddf1', EU: '\ud83c\uddea\ud83c\uddfa',
+  FI: '🇫🇮', EE: '🇪🇪', GB: '🇬🇧', SE: '🇸🇪', NO: '🇳🇴',
+  PT: '🇵🇹', DE: '🇩🇪', FR: '🇫🇷', ES: '🇪🇸', NL: '🇳🇱',
+  AT: '🇦🇹', CH: '🇨🇭', IT: '🇮🇹', DK: '🇩🇰', BE: '🇧🇪',
+  PL: '🇵🇱', EU: '🇪🇺',
 };
 
-// Flag emoji for Asia countries
 const ASIA_FLAGS: Record<string, string> = {
-  SG: '\ud83c\uddf8\ud83c\uddec', JP: '\ud83c\uddef\ud83c\uddf5', KR: '\ud83c\uddf0\ud83c\uddf7',
-  HK: '\ud83c\udded\ud83c\uddf0', TH: '\ud83c\uddf9\ud83c\udded', AE: '\ud83c\udde6\ud83c\uddea',
-  TW: '\ud83c\uddf9\ud83c\uddfc', MY: '\ud83c\uddf2\ud83c\uddfe', ID: '\ud83c\uddee\ud83c\udde9',
-  VN: '\ud83c\uddfb\ud83c\uddf3', PH: '\ud83c\uddf5\ud83c\udded', IN: '\ud83c\uddee\ud83c\uddf3',
-  CN: '\ud83c\udde8\ud83c\uddf3',
+  SG: '🇸🇬', JP: '🇯🇵', KR: '🇰🇷', HK: '🇭🇰', TH: '🇹🇭',
+  AE: '🇦🇪', TW: '🇹🇼', MY: '🇲🇾', ID: '🇮🇩', VN: '🇻🇳',
+  PH: '🇵🇭', IN: '🇮🇳', CN: '🇨🇳',
 };
 
 function dotRadius(source: string | undefined, hovered: boolean): number {
@@ -193,9 +193,9 @@ function CamDrawer({
 }
 
 // ---------------------------------------------------------------------------
-// Component
+// Component — wrapped in forwardRef to expose rotateTo to the parent
 // ---------------------------------------------------------------------------
-export default function GlobeView({
+const GlobeView = forwardRef<GlobeViewHandle, Props>(function GlobeView({
   cams, totalCount, loading, errors = [],
   visible, euVisible, asiaVisible,
   onToggleSource, onToggleEu, onToggleAsia,
@@ -203,7 +203,7 @@ export default function GlobeView({
   countryFilter, onClearFilter,
   countries = [],
   onSearchSelect,
-}: Props) {
+}, ref) {
   const canvasRef    = useRef<HTMLCanvasElement>(null);
   const rafRef       = useRef<number>(0);
   const rotRef       = useRef<[number, number, number]>([0, TILT, 0]);
@@ -223,7 +223,14 @@ export default function GlobeView({
   const [lightboxEntry, setLightboxEntry] = useState<CamLightboxEntry | null>(null);
   const [drawerCam,     setDrawerCam]     = useState<GlobeCam | null>(null);
 
-  // ── Draw one frame ─────────────────────────────────────────────────────────────────────────────────────
+  // Expose rotateTo so MapClient can pan the globe on country search
+  const rotateTo = useCallback((lon: number, lat: number) => {
+    rotRef.current = [-lon, -lat, 0];
+  }, []);
+
+  useImperativeHandle(ref, () => ({ rotateTo }), [rotateTo]);
+
+  // ── Draw one frame ───────────────────────────────────────────────────────
   const draw = useCallback((now: number) => {
     const canvas = canvasRef.current;
     if (!canvas || !readyRef.current) { rafRef.current = requestAnimationFrame(draw); return; }
@@ -336,10 +343,6 @@ export default function GlobeView({
     return () => ro.disconnect();
   }, []);
 
-  const rotateTo = useCallback((lon: number, lat: number) => {
-    rotRef.current = [-lon, -lat, 0];
-  }, []);
-
   const getCamAt = useCallback((ex: number, ey: number): GlobeCam | null => {
     const canvas = canvasRef.current, proj = projRef.current;
     if (!canvas || !proj) return null;
@@ -415,6 +418,7 @@ export default function GlobeView({
   }, []);
   const onTouchEnd = useCallback(() => { pauseRef.current = false; lastTouchRef.current = null; }, []);
 
+  // React to countryFilter prop — pan globe to selected country
   useEffect(() => {
     if (countryFilter) rotateTo(countryFilter.lon, countryFilter.lat);
   }, [countryFilter, rotateTo]);
@@ -537,7 +541,7 @@ export default function GlobeView({
                   <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', opacity: visible[key] ? 1 : 0.35, transition: 'opacity 0.2s' }}>
                     <input type="checkbox" checked={!!visible[key]} onChange={() => onToggleSource(key)}
                       style={{ accentColor: '#00dc64', cursor: 'pointer', width: 12, height: 12 }} />
-                    <span style={{ fontSize: 9, letterSpacing: '0.06em', color: 'rgba(0,200,90,0.7)' }}>▉</span>
+                    <span style={{ fontSize: 9, letterSpacing: '0.06em', color: 'rgba(0,200,90,0.7)' }}>█</span>
                     <span style={{ flex: 1 }}>{label}</span>
                   </label>
                 ))}
@@ -604,4 +608,6 @@ export default function GlobeView({
       <CamLightbox entry={lightboxEntry} onClose={() => setLightboxEntry(null)} />
     </div>
   );
-}
+});
+
+export default GlobeView;
