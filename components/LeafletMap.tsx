@@ -85,7 +85,8 @@ function Legend({
   onToggleSource, onToggleEu, onToggleAsia,
   counts, loading, errors, countryFilter, onClearFilter,
 }: LegendProps) {
-  const [open, setOpen] = useState(true);
+  // Start collapsed — user expands on demand
+  const [open, setOpen] = useState(false);
 
   const totalCount = Object.values(counts).reduce<number>((s, v) => s + (v ?? 0), 0);
 
@@ -411,10 +412,16 @@ export default function LeafletMap(props: LeafletMapProps) {
       style={{ height: '100vh', width: '100vw', background: '#04080f' }}
       worldCopyJump
     >
+      {/*
+        Free dark basemap — Stadia Maps AlidadeSmoothDark.
+        No API key required for tile requests without a Stadia account
+        (fair-use policy covers low-volume / dev usage).
+        Attribution required by ODbL + Stadia terms.
+      */}
       <TileLayer
-        url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-        maxZoom={19}
+        url="https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png"
+        attribution='&copy; <a href="https://stadiamaps.com/" target="_blank">Stadia Maps</a> &copy; <a href="https://openmaptiles.org/" target="_blank">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>'
+        maxZoom={20}
       />
       <MapInner {...props} />
     </MapContainer>
