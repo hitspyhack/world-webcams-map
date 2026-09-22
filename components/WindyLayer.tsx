@@ -36,6 +36,8 @@ interface WindyLayerProps {
   onMissingKey?: () => void;
   onExpand?: (entry: CamLightboxEntry) => void;
   countryFilter?: CountryEntry;
+  /** When set, overrides live viewport bbox (e.g. for country-filter mode). */
+  forceBbox?: string | null;
   debounceMs?: number;
   limit?: number;
 }
@@ -46,11 +48,17 @@ export default function WindyLayer({
   onMissingKey,
   onExpand,
   countryFilter,
+  forceBbox = null,
   debounceMs = 600,
   limit = 50,
 }: WindyLayerProps) {
   const icon = useMemo(makeIcon, []);
-  const { webcams, loading, error, missingKey } = useWindyWebcams({ enabled, debounceMs, limit });
+  const { webcams, loading, error, missingKey } = useWindyWebcams({
+    enabled,
+    debounceMs,
+    limit,
+    forceBbox,
+  });
 
   const populated = useMemo(() => {
     const base = webcams.filter(isPopulated);
