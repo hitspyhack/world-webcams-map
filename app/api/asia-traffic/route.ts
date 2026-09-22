@@ -1,28 +1,15 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-// Aggregator — calls all EU + nearby-country sub-routes and merges
-// ?countries=FI,EE,GB,NO,SE,PT,DE,FR,ES,NL,AT,CH,IT,DK,BE,PL
-// Default: all 16
+// Aggregator — calls all Asia traffic sub-routes and merges results
+// ?countries=SG,JP,KR,TW,TH  (default: all)
 
 const SUB_ROUTES: Record<string, string> = {
-  FI: '/api/eu-traffic/finland',
-  EE: '/api/eu-traffic/estonia',
-  GB: '/api/eu-traffic/uk',
-  SE: '/api/eu-traffic/sweden',
-  NO: '/api/eu-traffic/norway',
-  PT: '/api/eu-traffic/portugal',
-  DE: '/api/eu-traffic/germany',
-  FR: '/api/eu-traffic/france',
-  ES: '/api/eu-traffic/spain',
-  NL: '/api/eu-traffic/netherlands',
-  AT: '/api/eu-traffic/austria',
-  CH: '/api/eu-traffic/switzerland',
-  IT: '/api/eu-traffic/italy',
-  DK: '/api/eu-traffic/denmark',
-  BE: '/api/eu-traffic/belgium',
-  PL: '/api/eu-traffic/poland',
-  EU: '/api/eu-traffic/overpass-roads', // generic EU OSM fallback
+  SG: '/api/asia-traffic/singapore',
+  JP: '/api/asia-traffic/japan',
+  KR: '/api/asia-traffic/south-korea',
+  TW: '/api/asia-traffic/taiwan',
+  TH: '/api/asia-traffic/thailand',
 };
 
 export async function GET(req: NextRequest) {
