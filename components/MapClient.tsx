@@ -64,7 +64,6 @@ interface AsiaCam {
 }
 
 // ─── Country centroids (ISO-3166-1 alpha-2) ─────────────────────────────────
-// Used for fly-to when a country is selected in the search bar.
 const COUNTRY_CENTROIDS: Record<string, { name: string; lat: number; lon: number }> = {
   AD:{name:'Andorra',lat:42.55,lon:1.60},AE:{name:'United Arab Emirates',lat:23.42,lon:53.85},
   AF:{name:'Afghanistan',lat:33.93,lon:67.71},AG:{name:'Antigua and Barbuda',lat:17.06,lon:-61.80},
@@ -165,16 +164,14 @@ const COUNTRY_CENTROIDS: Record<string, { name: string; lat: number; lon: number
   ZW:{name:'Zimbabwe',lat:-19.02,lon:29.15},
 };
 
-// normalise a raw country string to an ISO-2 code for centroid lookup
 function toCode(raw?: string): string {
   if (!raw) return '';
   const up = raw.trim().toUpperCase();
   if (up.length === 2 && COUNTRY_CENTROIDS[up]) return up;
-  // try name match
   for (const [code, c] of Object.entries(COUNTRY_CENTROIDS)) {
     if (c.name.toLowerCase() === raw.trim().toLowerCase()) return code;
   }
-  return up; // return as-is (may be a full name stored directly)
+  return up;
 }
 
 const SEED_CAMS: GlobeCam[] = [
@@ -197,6 +194,25 @@ const SEED_CAMS: GlobeCam[] = [
 
 function camCountry(c: {country?:string;sourceCountry?:string}) {
   return c.sourceCountry ?? c.country ?? '';
+}
+
+// Build a lightbox-ready GlobeCam from a Windy webcam object
+function windyToGlobeCam(c: WindyWebcam): GlobeCam {
+  const lat = c.location!.latitude;
+  const lon = c.location!.longitude;
+  // Windy player embed: https://webcams.windy.com/webcams/{id}/player
+  const id = c.id ?? (c as unknown as Record<string,unknown>).webcamId;
+  const embedUrl = id ? `https://webcams.windy.com/webcams/${id}/player` : undefined;
+  const imageUrl = c.image?.current?.preview ?? c.image?.sizes?.large?.url;
+  return {
+    lat, lon,
+    title: c.title ?? 'Windy',
+    color: SOURCE_COLORS.windy,
+    source: 'windy',
+    embedUrl,
+    imageUrl,
+    linkUrl: id ? `https://www.windy.com/webcams/${id}` : undefined,
+  };
 }
 
 export default function MapClient() {
@@ -313,7 +329,6 @@ export default function MapClient() {
   // ─── Build country list from all loaded cam data ─────────────────────────
   const countryList: CountryEntry[] = useMemo(() => {
     const counts: Record<string, { name: string; lat: number; lon: number; count: number }> = {};
-
     const addCode = (raw?: string) => {
       if (!raw) return;
       const code = toCode(raw);
@@ -323,26 +338,26 @@ export default function MapClient() {
       if (!counts[code]) counts[code] = { name: centroid.name, lat: centroid.lat, lon: centroid.lon, count: 0 };
       counts[code].count++;
     };
-
-    for (const c of skylineCams)   addCode(camCountry(c));
-    for (const c of earthCams)     addCode(camCountry(c));
-    for (const c of osmCams)       addCode(camCountry(c));
-    for (const c of deckCams)      addCode(camCountry(c));
-    for (const c of euCams)        addCode(camCountry(c));
-    for (const c of asiaCams)      addCode(camCountry(c));
+    for (const c of skylineCams)    addCode(camCountry(c));
+    for (const c of earthCams)      addCode(camCountry(c));
+    for (const c of osmCams)        addCode(camCountry(c));
+    for (const c of deckCams)       addCode(camCountry(c));
+    for (const c of euCams)         addCode(camCountry(c));
+    for (const c of asiaCams)       addCode(camCountry(c));
     for (const c of windyGlobeCams) addCode(c.location?.country ?? '');
-
     return Object.entries(counts)
       .map(([code, v]) => ({ code, ...v }))
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
   }, [skylineCams, earthCams, osmCams, deckCams, euCams, asiaCams, windyGlobeCams]);
 
-  // ─── When country selected: fly to it ───────────────────────────────────
+  // ─── Country select: on globe → rotate to it; on map → fly to it ─────────
   const handleCountrySelect = useCallback((entry: CountryEntry | null) => {
     setCountryFilter(entry);
     if (entry) {
-      setFlyTo({ lat: entry.lat, lon: entry.lon, zoom: 6 });
-      if (mode !== 'map') setMode('map');
+      if (mode === 'map') {
+        setFlyTo({ lat: entry.lat, lon: entry.lon, zoom: 6 });
+      }
+      // On globe: GlobeView watches countryFilter and calls rotateTo internally
     }
   }, [mode]);
 
@@ -355,53 +370,93 @@ export default function MapClient() {
       raw.toLowerCase() === countryFilter.name.toLowerCase();
   }, [countryFilter]);
 
-  const filteredSkyline  = useMemo(() => countryFilter ? skylineCams.filter(c => matchCountry(camCountry(c)))  : skylineCams,  [skylineCams,  matchCountry, countryFilter]);
-  const filteredEarth    = useMemo(() => countryFilter ? earthCams.filter(c => matchCountry(camCountry(c)))    : earthCams,    [earthCams,    matchCountry, countryFilter]);
-  const filteredOsm      = useMemo(() => countryFilter ? osmCams.filter(c => matchCountry(camCountry(c)))      : osmCams,      [osmCams,      matchCountry, countryFilter]);
-  const filteredDeck     = useMemo(() => countryFilter ? deckCams.filter(c => matchCountry(camCountry(c)))     : deckCams,     [deckCams,     matchCountry, countryFilter]);
-  const filteredEu       = useMemo(() => countryFilter ? euCams.filter(c => matchCountry(camCountry(c)))       : euCams,       [euCams,       matchCountry, countryFilter]);
-  const filteredAsia     = useMemo(() => countryFilter ? asiaCams.filter(c => matchCountry(camCountry(c)))     : asiaCams,     [asiaCams,     matchCountry, countryFilter]);
+  const filteredSkyline = useMemo(() => countryFilter ? skylineCams.filter(c => matchCountry(camCountry(c))) : skylineCams,  [skylineCams,  matchCountry, countryFilter]);
+  const filteredEarth   = useMemo(() => countryFilter ? earthCams.filter(c => matchCountry(camCountry(c)))   : earthCams,    [earthCams,    matchCountry, countryFilter]);
+  const filteredOsm     = useMemo(() => countryFilter ? osmCams.filter(c => matchCountry(camCountry(c)))     : osmCams,      [osmCams,      matchCountry, countryFilter]);
+  const filteredDeck    = useMemo(() => countryFilter ? deckCams.filter(c => matchCountry(camCountry(c)))    : deckCams,     [deckCams,     matchCountry, countryFilter]);
+  const filteredEu      = useMemo(() => countryFilter ? euCams.filter(c => matchCountry(camCountry(c)))      : euCams,       [euCams,       matchCountry, countryFilter]);
+  const filteredAsia    = useMemo(() => countryFilter ? asiaCams.filter(c => matchCountry(camCountry(c)))    : asiaCams,     [asiaCams,     matchCountry, countryFilter]);
 
   const globeCams: GlobeCam[] = useMemo(() => {
     const cams: GlobeCam[] = [];
     if (visible.windy)
       for (const c of windyGlobeCams) {
         if (countryFilter && !matchCountry(c.location?.country ?? '')) continue;
-        const lat = c.location!.latitude, lon = c.location!.longitude;
-        cams.push({ lat, lon, title: c.title ?? 'Windy', color: SOURCE_COLORS.windy, source: 'windy' });
+        cams.push(windyToGlobeCam(c));
       }
     if (visible.skyline)
       for (const c of filteredSkyline)
         if (c.lat && c.lon)
-          cams.push({ lat: c.lat, lon: c.lon, title: c.title ?? 'Skyline', color: SOURCE_COLORS.skyline, source: 'skyline' });
+          cams.push({
+            lat: c.lat, lon: c.lon,
+            title: c.title ?? 'Skyline',
+            color: SOURCE_COLORS.skyline, source: 'skyline',
+            imageUrl: c.thumbnail ?? c.image,
+            linkUrl: c.url,
+          });
     if (visible.earthcam)
       for (const c of filteredEarth)
         if (c.lat && c.lon)
-          cams.push({ lat: c.lat, lon: c.lon, title: c.title ?? 'EarthCam', color: SOURCE_COLORS.earthcam, source: 'earthcam' });
+          cams.push({
+            lat: c.lat, lon: c.lon,
+            title: c.title ?? 'EarthCam',
+            color: SOURCE_COLORS.earthcam, source: 'earthcam',
+            embedUrl: c.embedUrl ?? c.liveUrl,
+            linkUrl: c.url,
+          });
     if (visible.osm)
       for (const c of filteredOsm)
         if (c.lat && c.lon)
-          cams.push({ lat: c.lat, lon: c.lon, title: c.title ?? c.name ?? 'OSM', color: SOURCE_COLORS.osm, source: 'osm' });
+          cams.push({
+            lat: c.lat, lon: c.lon,
+            title: c.title ?? c.name ?? 'OSM',
+            color: SOURCE_COLORS.osm, source: 'osm',
+            embedUrl: c.url,
+          });
     if (visible.deckchair)
       for (const c of filteredDeck)
         if (c.lat && c.lon)
-          cams.push({ lat: c.lat, lon: c.lon, title: c.title ?? 'Deckchair', color: SOURCE_COLORS.deckchair, source: 'deckchair' });
+          cams.push({
+            lat: c.lat, lon: c.lon,
+            title: c.title ?? 'Deckchair',
+            color: SOURCE_COLORS.deckchair, source: 'deckchair',
+            embedUrl: c.embedUrl,
+            imageUrl: c.thumbnail,
+            linkUrl: c.url,
+          });
     for (const c of filteredEu) {
       const key = (c.sourceCountry ?? c.country ?? 'EU') in EU_COUNTRIES ? (c.sourceCountry ?? c.country ?? 'EU') : 'EU';
       if (euVisible[key] === false) continue;
-      cams.push({ lat: c.lat, lon: c.lon, title: c.title ?? 'EU Traffic', color: EU_GLOBE_COLOR, source: 'eu' });
+      cams.push({
+        lat: c.lat, lon: c.lon,
+        title: c.title ?? 'EU Traffic',
+        color: EU_GLOBE_COLOR, source: 'eu',
+        embedUrl: (c as unknown as Record<string,string>).sourceUrl,
+        imageUrl: (c as unknown as Record<string,string>).imageUrl,
+      });
     }
     for (const c of filteredAsia) {
       const key = c.sourceCountry ?? c.country ?? 'SG';
       if (asiaVisible[key] === false) continue;
-      cams.push({ lat: c.lat, lon: c.lon, title: c.title ?? 'Asia cam', color: ASIA_GLOBE_COLOR, source: 'asia' });
+      cams.push({
+        lat: c.lat, lon: c.lon,
+        title: c.title ?? 'Asia cam',
+        color: ASIA_GLOBE_COLOR, source: 'asia',
+        embedUrl: (c as unknown as Record<string,string>).sourceUrl,
+        imageUrl: (c as unknown as Record<string,string>).imageUrl,
+      });
     }
     return cams.length > 0 ? cams : SEED_CAMS.filter(c => visible[c.source as SourceKey] !== false);
   }, [windyGlobeCams, filteredSkyline, filteredEarth, filteredOsm, filteredDeck, filteredEu, filteredAsia, visible, euVisible, asiaVisible, countryFilter, matchCountry]);
 
+  // Globe cam click: open lightbox (handled inside GlobeView) or fly to map
   const handleGlobeCamClick = useCallback((cam: GlobeCam) => {
-    setFlyTo({ lat: cam.lat, lon: cam.lon, zoom: 13 });
-    setMode('map');
+    // If no embeddable content, switch to map and fly to cam location
+    if (!cam.embedUrl && !cam.imageUrl) {
+      setFlyTo({ lat: cam.lat, lon: cam.lon, zoom: 13 });
+      setMode('map');
+    }
+    // Otherwise GlobeView opens its own lightbox — nothing to do here
   }, []);
 
   const grandTotal = windyMapCount + filteredSkyline.length + filteredEarth.length + filteredOsm.length + filteredDeck.length + asiaCount + euCount;
@@ -430,6 +485,8 @@ export default function MapClient() {
           onToggleAsia={(k) => setAsiaVisible(v => ({ ...v, [k]: !v[k] }))}
           onEnterMap={() => setMode('map')}
           onCamClick={handleGlobeCamClick}
+          countryFilter={countryFilter}
+          onClearFilter={() => handleCountrySelect(null)}
         />
       </div>
 
@@ -488,14 +545,12 @@ export default function MapClient() {
         {mode === 'globe' ? '🗺 MAP' : '🌐 GLOBE'}
       </button>
 
-      {/* Country search — only visible on map */}
-      {mode === 'map' && (
-        <CountrySearch
-          countries={countryList}
-          selected={countryFilter}
-          onSelect={handleCountrySelect}
-        />
-      )}
+      {/* Country search — visible in BOTH globe and map modes */}
+      <CountrySearch
+        countries={countryList}
+        selected={countryFilter}
+        onSelect={handleCountrySelect}
+      />
     </div>
   );
 }

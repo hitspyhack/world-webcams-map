@@ -3,7 +3,10 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { ASIA_SOURCES } from './AsiaWebcamsLayer';
 import { EU_COUNTRIES } from './EUTrafficLayer';
+import CamLightbox from './CamLightbox';
+import type { CamLightboxEntry } from './CamLightbox';
 import type { SourceKey } from './MapClient';
+import type { CountryEntry } from './CountrySearch';
 
 declare global {
   interface Window {
@@ -20,6 +23,10 @@ export interface GlobeCam {
   title: string;
   color: string;
   source?: string;
+  // optional lightbox fields — populated by MapClient for embeddable sources
+  embedUrl?: string;
+  imageUrl?: string;
+  linkUrl?:  string;
 }
 
 interface Props {
@@ -34,7 +41,12 @@ interface Props {
   onToggleEu:   (key: string) => void;
   onToggleAsia: (key: string) => void;
   onEnterMap: () => void;
+  /** Called when user clicks a cam dot — if omitted, falls back to onEnterMap */
   onCamClick?: (cam: GlobeCam) => void;
+  /** Country filter set from the search bar */
+  countryFilter?: CountryEntry | null;
+  /** Clear the active country filter */
+  onClearFilter?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -66,8 +78,6 @@ const SOURCE_LABELS: Record<SourceKey, string> = {
   windy: 'Windy', skyline: 'Skyline', earthcam: 'EarthCam', osm: 'OSM', deckchair: 'Deckchair',
 };
 
-// Dot size by source — EU/Asia get a slightly smaller dot so dense regions
-// don't become a solid blob, Windy get a slightly larger distinctive size.
 function dotRadius(source: string | undefined, hovered: boolean): number {
   if (hovered) return HOVER_RADIUS;
   if (source === 'eu' || source === 'asia') return 2.2;
@@ -83,12 +93,12 @@ export default function GlobeView({
   visible, euVisible, asiaVisible,
   onToggleSource, onToggleEu, onToggleAsia,
   onEnterMap, onCamClick,
+  countryFilter, onClearFilter,
 }: Props) {
   const canvasRef    = useRef<HTMLCanvasElement>(null);
   const rafRef       = useRef<number>(0);
   const rotRef       = useRef<[number, number, number]>([0, TILT, 0]);
   const dragRef      = useRef<{ active: boolean; x: number; y: number }>({ active: false, x: 0, y: 0 });
-  // pauseRef is ONLY true while the pointer/touch is physically held down
   const pauseRef     = useRef(false);
   const lastFrameRef = useRef(0);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -101,6 +111,9 @@ export default function GlobeView({
 
   const [legendOpen,    setLegendOpen]    = useState(false);
   const [legendSection, setLegendSection] = useState<'global' | 'eu' | 'asia'>('global');
+
+  // Lightbox state — opened when user clicks a cam dot
+  const [lightboxEntry, setLightboxEntry] = useState<CamLightboxEntry | null>(null);
 
   // ── Draw one frame ───────────────────────────────────────────────────────
   const draw = useCallback((now: number) => {
@@ -115,7 +128,6 @@ export default function GlobeView({
     const cx = W / 2, cy = H / 2;
     const radius = Math.min(W, H) * 0.42;
 
-    // Spin whenever the pointer is NOT physically held down (drag counts as held)
     if (!pauseRef.current && !dragRef.current.active)
       rotRef.current = [rotRef.current[0] + SPIN_SPEED, TILT, 0];
 
@@ -211,7 +223,13 @@ export default function GlobeView({
     return () => ro.disconnect();
   }, []);
 
-  // Hit-test — slightly larger hit area for small EU/Asia dots
+  // Rotate globe to bring [lon, lat] into front-centre
+  const rotateTo = useCallback((lon: number, lat: number) => {
+    // d3 geoOrthographic rotate = [-lon, -lat] to put that point at centre
+    rotRef.current = [-lon, -lat, 0];
+  }, []);
+
+  // Hit-test
   const getCamAt = useCallback((ex: number, ey: number): GlobeCam | null => {
     const canvas = canvasRef.current, proj = projRef.current;
     if (!canvas || !proj) return null;
@@ -232,10 +250,6 @@ export default function GlobeView({
   }, [cams]);
 
   // ── Mouse handlers ───────────────────────────────────────────────────────
-  // NOTE: onMouseEnter is intentionally removed — hovering no longer pauses
-  // the spin. The globe rotates continuously unless the user is actively
-  // holding the mouse button down (drag) or touching (touch).
-
   const onMouseMove = useCallback((e: React.MouseEvent) => {
     if (dragRef.current.active) {
       const dx = e.clientX - dragRef.current.x, dy = e.clientY - dragRef.current.y;
@@ -264,19 +278,16 @@ export default function GlobeView({
   }, [getCamAt]);
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
-    // Pause spin and start drag only while the button is physically held
     pauseRef.current = true;
     dragRef.current = { active: true, x: e.clientX, y: e.clientY };
   }, []);
 
   const onMouseUp = useCallback(() => {
     dragRef.current.active = false;
-    // Resume spin immediately when the button is released
     pauseRef.current = false;
   }, []);
 
   const onMouseLeave = useCallback(() => {
-    // Release drag state if pointer leaves canvas; spin continues/resumes
     dragRef.current.active = false;
     pauseRef.current = false;
     hoveredRef.current = null;
@@ -285,10 +296,23 @@ export default function GlobeView({
 
   const onClick = useCallback((e: React.MouseEvent) => {
     const cam = getCamAt(e.clientX, e.clientY);
-    if (cam) {
-      if (onCamClick) onCamClick(cam);
-      else onEnterMap();
+    if (!cam) return;
+
+    // If the cam has embeddable content, open lightbox directly on the globe
+    if (cam.embedUrl || cam.imageUrl) {
+      setLightboxEntry({
+        source:   cam.source ?? 'osm',
+        title:    cam.title,
+        embedUrl: cam.embedUrl,
+        imageUrl: cam.imageUrl,
+        linkUrl:  cam.linkUrl,
+      });
+      return;
     }
+
+    // Fall back to external handler (switch to map / fly-to)
+    if (onCamClick) onCamClick(cam);
+    else onEnterMap();
   }, [getCamAt, onCamClick, onEnterMap]);
 
   // Touch handlers
@@ -307,6 +331,11 @@ export default function GlobeView({
   const onTouchEnd = useCallback(() => {
     pauseRef.current = false; lastTouchRef.current = null;
   }, []);
+
+  // ── When countryFilter changes, rotate globe to face it ─────────────────
+  useEffect(() => {
+    if (countryFilter) rotateTo(countryFilter.lon, countryFilter.lat);
+  }, [countryFilter, rotateTo]);
 
   // ── Render ───────────────────────────────────────────────────────────────
   const displayCount = totalCount ?? cams.length;
@@ -347,6 +376,35 @@ export default function GlobeView({
         )}
       </div>
 
+      {/* Active country filter badge — shown below HUD */}
+      {countryFilter && (
+        <div style={{
+          position: 'absolute', top: 72, left: '50%', transform: 'translateX(-50%)',
+          zIndex: 10, display: 'flex', alignItems: 'center', gap: 8,
+          background: 'rgba(4,14,10,0.90)',
+          border: '1px solid rgba(88,166,255,0.45)',
+          borderRadius: 20, padding: '4px 12px 4px 14px',
+          fontFamily: 'monospace', fontSize: 11,
+          color: '#79c0ff', letterSpacing: '0.06em',
+          boxShadow: '0 2px 12px rgba(0,0,0,0.5)',
+          pointerEvents: 'auto',
+        }}>
+          <span>🔍 {countryFilter.name}</span>
+          <button
+            onClick={onClearFilter}
+            aria-label="Clear country filter"
+            style={{
+              background: 'none', border: 'none',
+              color: '#8b949e', fontSize: 13,
+              cursor: 'pointer', lineHeight: 1, padding: 0,
+              transition: 'color 0.15s',
+            }}
+            onMouseEnter={e => (e.currentTarget.style.color = '#f87171')}
+            onMouseLeave={e => (e.currentTarget.style.color = '#8b949e')}
+          >✕</button>
+        </div>
+      )}
+
       {/* ── Source legend / filter panel ── */}
       <div style={{
         position: 'absolute', bottom: 24, right: 12, zIndex: 10,
@@ -355,7 +413,6 @@ export default function GlobeView({
         backdropFilter: 'blur(10px)', minWidth: 200,
         boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
       }}>
-        {/* Legend header / toggle */}
         <button
           onClick={() => setLegendOpen(o => !o)}
           style={{
@@ -372,8 +429,6 @@ export default function GlobeView({
 
         {legendOpen && (
           <div style={{ padding: '0 10px 10px', display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 380, overflowY: 'auto' }}>
-
-            {/* Section tabs */}
             <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
               {(['global', 'eu', 'asia'] as const).map(sec => (
                 <button key={sec} onClick={() => setLegendSection(sec)} style={{
@@ -387,7 +442,6 @@ export default function GlobeView({
               ))}
             </div>
 
-            {/* Global sources */}
             {legendSection === 'global' && (
               <>
                 {(Object.entries(SOURCE_LABELS) as [SourceKey, string][]).map(([key, label]) => (
@@ -400,8 +454,6 @@ export default function GlobeView({
                 ))}
               </>
             )}
-
-            {/* EU sources */}
             {legendSection === 'eu' && (
               <>
                 {Object.entries(EU_COUNTRIES).map(([key, cfg]) => (
@@ -414,8 +466,6 @@ export default function GlobeView({
                 ))}
               </>
             )}
-
-            {/* Asia sources */}
             {legendSection === 'asia' && (
               <>
                 {Object.entries(ASIA_SOURCES).map(([key, cfg]) => (
@@ -428,7 +478,6 @@ export default function GlobeView({
                 ))}
               </>
             )}
-
           </div>
         )}
       </div>
@@ -457,7 +506,7 @@ export default function GlobeView({
         zIndex: 10, fontSize: 10, color: 'rgba(0,180,80,0.4)',
         fontFamily: 'monospace', letterSpacing: '0.1em', pointerEvents: 'none',
       }}>
-        HOLD & DRAG TO ROTATE · CLICK DOT TO FLY TO IN MAP
+        HOLD & DRAG TO ROTATE · CLICK DOT TO VIEW LIVE FEED
       </div>
 
       {/* Cam tooltip */}
@@ -469,6 +518,9 @@ export default function GlobeView({
         fontFamily: 'monospace', fontSize: 11, letterSpacing: '0.05em',
         opacity: 0, transition: 'opacity 0.1s', whiteSpace: 'nowrap',
       }} />
+
+      {/* Live-view lightbox */}
+      <CamLightbox entry={lightboxEntry} onClose={() => setLightboxEntry(null)} />
     </div>
   );
 }
