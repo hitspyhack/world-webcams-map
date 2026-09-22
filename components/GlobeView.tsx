@@ -5,8 +5,9 @@ import { ASIA_SOURCES } from './AsiaWebcamsLayer';
 import { EU_COUNTRIES } from './EUTrafficLayer';
 import CamLightbox from './CamLightbox';
 import type { CamLightboxEntry } from './CamLightbox';
-import type { SourceKey } from './MapClient';
+import CountrySearch from './CountrySearch';
 import type { CountryEntry } from './CountrySearch';
+import type { SourceKey } from './MapClient';
 
 declare global {
   interface Window {
@@ -23,7 +24,6 @@ export interface GlobeCam {
   title: string;
   color: string;
   source?: string;
-  // optional lightbox fields — populated by MapClient for embeddable sources
   embedUrl?: string;
   imageUrl?: string;
   linkUrl?:  string;
@@ -41,12 +41,16 @@ interface Props {
   onToggleEu:   (key: string) => void;
   onToggleAsia: (key: string) => void;
   onEnterMap: () => void;
-  /** Called when user clicks a cam dot — if omitted, falls back to onEnterMap */
+  /** Called when user wants to view cam in map (no-embed fallback) */
   onCamClick?: (cam: GlobeCam) => void;
   /** Country filter set from the search bar */
   countryFilter?: CountryEntry | null;
   /** Clear the active country filter */
   onClearFilter?: () => void;
+  /** Country list for the search dropdown */
+  countries?: CountryEntry[];
+  /** Called when user selects a country from search */
+  onSearchSelect?: (c: CountryEntry | null) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -78,11 +82,170 @@ const SOURCE_LABELS: Record<SourceKey, string> = {
   windy: 'Windy', skyline: 'Skyline', earthcam: 'EarthCam', osm: 'OSM', deckchair: 'Deckchair',
 };
 
+const SOURCE_BADGE_COLORS: Record<string, string> = {
+  windy: '#60a5fa', skyline: '#f87171', earthcam: '#fb923c',
+  osm: '#4ade80', deckchair: '#c084fc', eu: '#818cf8', asia: '#fbbf24',
+};
+
 function dotRadius(source: string | undefined, hovered: boolean): number {
   if (hovered) return HOVER_RADIUS;
   if (source === 'eu' || source === 'asia') return 2.2;
   if (source === 'windy') return 3.5;
   return DOT_RADIUS;
+}
+
+// ---------------------------------------------------------------------------
+// Cam drawer — appears in bottom-left, slides up when a cam is selected
+// ---------------------------------------------------------------------------
+function CamDrawer({
+  cam,
+  onClose,
+  onExpand,
+  onViewInMap,
+}: {
+  cam: GlobeCam | null;
+  onClose: () => void;
+  onExpand: (entry: CamLightboxEntry) => void;
+  onViewInMap: (cam: GlobeCam) => void;
+}) {
+  if (!cam) return null;
+
+  const badgeColor = SOURCE_BADGE_COLORS[cam.source ?? ''] ?? '#8b949e';
+  const hasEmbed   = !!cam.embedUrl;
+  const hasImage   = !!cam.imageUrl;
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        bottom: 110,
+        left: 12,
+        zIndex: 20,
+        width: 280,
+        background: 'rgba(4,14,10,0.97)',
+        border: '1px solid rgba(0,200,90,0.35)',
+        borderRadius: 10,
+        fontFamily: 'monospace',
+        fontSize: 11,
+        color: '#a0ffcc',
+        backdropFilter: 'blur(12px)',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.7)',
+        overflow: 'hidden',
+        animation: 'drawerSlideUp 0.22s cubic-bezier(0.16,1,0.3,1)',
+      }}
+    >
+      <style>{`
+        @keyframes drawerSlideUp {
+          from { opacity: 0; transform: translateY(18px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+
+      {/* Header */}
+      <div style={{
+        display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
+        padding: '9px 10px 6px',
+        borderBottom: '1px solid rgba(0,200,90,0.15)',
+      }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            fontSize: 12, fontWeight: 700, color: '#e6edf3',
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>{cam.title}</div>
+          {cam.source && (
+            <div style={{
+              marginTop: 3, fontSize: 9, letterSpacing: '0.08em',
+              color: badgeColor, fontWeight: 700,
+            }}>
+              SOURCE: {cam.source.toUpperCase()}
+            </div>
+          )}
+        </div>
+        <button
+          onClick={onClose}
+          aria-label="Close cam panel"
+          style={{
+            background: 'none', border: 'none', color: '#8b949e',
+            fontSize: 14, cursor: 'pointer', lineHeight: 1,
+            padding: '0 0 0 8px', flexShrink: 0,
+            transition: 'color 0.15s',
+          }}
+          onMouseEnter={e => (e.currentTarget.style.color = '#f87171')}
+          onMouseLeave={e => (e.currentTarget.style.color = '#8b949e')}
+        >✕</button>
+      </div>
+
+      {/* Media area */}
+      {hasEmbed ? (
+        <div style={{ position: 'relative', width: '100%', aspectRatio: '16/9', background: '#04080f' }}>
+          <iframe
+            src={cam.embedUrl}
+            title={cam.title}
+            allowFullScreen
+            style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
+          />
+        </div>
+      ) : hasImage ? (
+        <div style={{ position: 'relative', width: '100%', lineHeight: 0 }}>
+          <img
+            src={cam.imageUrl}
+            alt={cam.title}
+            style={{
+              width: '100%', display: 'block',
+              background: '#04080f', maxHeight: 160, objectFit: 'cover',
+            }}
+            loading="lazy"
+            onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+          />
+        </div>
+      ) : (
+        <div style={{
+          padding: '18px 0', textAlign: 'center',
+          fontSize: 10, color: 'rgba(0,200,90,0.35)', letterSpacing: '0.06em',
+        }}>
+          NO PREVIEW AVAILABLE
+        </div>
+      )}
+
+      {/* Action buttons */}
+      <div style={{ display: 'flex', gap: 6, padding: '8px 10px' }}>
+        {(hasEmbed || hasImage) && (
+          <button
+            onClick={() => onExpand({
+              source: (cam.source ?? 'osm') as CamLightboxEntry['source'],
+              title: cam.title,
+              embedUrl: cam.embedUrl,
+              imageUrl: cam.imageUrl,
+              linkUrl: cam.linkUrl,
+            })}
+            style={{
+              flex: 1, padding: '5px 0',
+              background: 'rgba(0,200,90,0.10)',
+              border: '1px solid rgba(0,200,90,0.3)',
+              borderRadius: 6, color: '#6effb4',
+              fontSize: 10, cursor: 'pointer',
+              letterSpacing: '0.05em', transition: 'background 0.15s',
+            }}
+            onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,200,90,0.20)')}
+            onMouseLeave={e => (e.currentTarget.style.background = 'rgba(0,200,90,0.10)')}
+          >⛶ EXPAND</button>
+        )}
+        <button
+          onClick={() => onViewInMap(cam)}
+          style={{
+            flex: 1, padding: '5px 0',
+            background: 'rgba(88,166,255,0.08)',
+            border: '1px solid rgba(88,166,255,0.25)',
+            borderRadius: 6, color: '#79c0ff',
+            fontSize: 10, cursor: 'pointer',
+            letterSpacing: '0.05em', transition: 'background 0.15s',
+          }}
+          onMouseEnter={e => (e.currentTarget.style.background = 'rgba(88,166,255,0.18)')}
+          onMouseLeave={e => (e.currentTarget.style.background = 'rgba(88,166,255,0.08)')}
+        >🗺 VIEW IN MAP</button>
+      </div>
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -94,6 +257,8 @@ export default function GlobeView({
   onToggleSource, onToggleEu, onToggleAsia,
   onEnterMap, onCamClick,
   countryFilter, onClearFilter,
+  countries = [],
+  onSearchSelect,
 }: Props) {
   const canvasRef    = useRef<HTMLCanvasElement>(null);
   const rafRef       = useRef<number>(0);
@@ -112,8 +277,11 @@ export default function GlobeView({
   const [legendOpen,    setLegendOpen]    = useState(false);
   const [legendSection, setLegendSection] = useState<'global' | 'eu' | 'asia'>('global');
 
-  // Lightbox state — opened when user clicks a cam dot
+  // Lightbox (full-screen)
   const [lightboxEntry, setLightboxEntry] = useState<CamLightboxEntry | null>(null);
+
+  // Cam drawer (inline preview panel)
+  const [drawerCam, setDrawerCam] = useState<GlobeCam | null>(null);
 
   // ── Draw one frame ───────────────────────────────────────────────────────
   const draw = useCallback((now: number) => {
@@ -225,7 +393,6 @@ export default function GlobeView({
 
   // Rotate globe to bring [lon, lat] into front-centre
   const rotateTo = useCallback((lon: number, lat: number) => {
-    // d3 geoOrthographic rotate = [-lon, -lat] to put that point at centre
     rotRef.current = [-lon, -lat, 0];
   }, []);
 
@@ -297,23 +464,20 @@ export default function GlobeView({
   const onClick = useCallback((e: React.MouseEvent) => {
     const cam = getCamAt(e.clientX, e.clientY);
     if (!cam) return;
+    // Always open the drawer first so user sees context before deciding
+    setDrawerCam(cam);
+  }, [getCamAt]);
 
-    // If the cam has embeddable content, open lightbox directly on the globe
-    if (cam.embedUrl || cam.imageUrl) {
-      setLightboxEntry({
-        source:   cam.source ?? 'osm',
-        title:    cam.title,
-        embedUrl: cam.embedUrl,
-        imageUrl: cam.imageUrl,
-        linkUrl:  cam.linkUrl,
-      });
-      return;
-    }
+  // Drawer actions
+  const handleDrawerExpand = useCallback((entry: CamLightboxEntry) => {
+    setLightboxEntry(entry);
+  }, []);
 
-    // Fall back to external handler (switch to map / fly-to)
+  const handleDrawerViewInMap = useCallback((cam: GlobeCam) => {
+    setDrawerCam(null);
     if (onCamClick) onCamClick(cam);
     else onEnterMap();
-  }, [getCamAt, onCamClick, onEnterMap]);
+  }, [onCamClick, onEnterMap]);
 
   // Touch handlers
   const onTouchStart = useCallback((e: React.TouchEvent) => {
@@ -376,8 +540,33 @@ export default function GlobeView({
         )}
       </div>
 
-      {/* Active country filter badge — shown below HUD */}
-      {countryFilter && (
+      {/* ── Country Search Bar ── */}
+      {/*
+        Rendered inline inside GlobeView (z-index 30) so it works even when
+        MapClient is not the direct parent. Offset left so it clears the
+        🗺 MAP toggle button that MapClient places at top:14, left:14.
+        If MapClient also renders CountrySearch, that outer one is hidden
+        while this one is active — they share the same selected/onSelect props.
+      */}
+      {countries.length > 0 && (
+        <div style={{
+          position: 'absolute', top: 14, left: '50%',
+          transform: 'translateX(-50%)',
+          // push right of the toggle button (≈ 95px wide incl shadow)
+          marginLeft: 48,
+          zIndex: 30,
+          width: 320, maxWidth: 'calc(100vw - 180px)',
+        }}>
+          <CountrySearch
+            countries={countries}
+            selected={countryFilter ?? null}
+            onSelect={onSearchSelect ?? (() => {})}
+          />
+        </div>
+      )}
+
+      {/* Active country filter badge — shown below HUD when search is NOT available */}
+      {countryFilter && countries.length === 0 && (
         <div style={{
           position: 'absolute', top: 72, left: '50%', transform: 'translateX(-50%)',
           zIndex: 10, display: 'flex', alignItems: 'center', gap: 8,
@@ -404,6 +593,14 @@ export default function GlobeView({
           >✕</button>
         </div>
       )}
+
+      {/* ── Cam Drawer (inline expandable panel) ── */}
+      <CamDrawer
+        cam={drawerCam}
+        onClose={() => setDrawerCam(null)}
+        onExpand={handleDrawerExpand}
+        onViewInMap={handleDrawerViewInMap}
+      />
 
       {/* ── Source legend / filter panel ── */}
       <div style={{
@@ -519,7 +716,7 @@ export default function GlobeView({
         opacity: 0, transition: 'opacity 0.1s', whiteSpace: 'nowrap',
       }} />
 
-      {/* Live-view lightbox */}
+      {/* Full-screen lightbox */}
       <CamLightbox entry={lightboxEntry} onClose={() => setLightboxEntry(null)} />
     </div>
   );
