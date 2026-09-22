@@ -10,6 +10,7 @@ import type {
   EarthCamItem,
   OsmWebcam,
   DeckchairWebcam,
+  WindyWebcam,
 } from '../types/webcam';
 
 const GlobeView = dynamic(() => import('./GlobeView'), {
@@ -45,9 +46,23 @@ export const SOURCE_COLORS: Record<SourceKey, string> = {
   deckchair: '#c084fc',
 };
 
+// Colours for EU + Asia dots on the globe (match their layer configs)
+const EU_GLOBE_COLOR   = '#818cf8'; // violet — EU traffic
+const ASIA_GLOBE_COLOR = '#fbbf24'; // gold   — Asia cams
+
 function toArray<T>(val: unknown): T[] { return Array.isArray(val) ? (val as T[]) : []; }
 
 export interface FlyToTarget { lat: number; lon: number; zoom?: number; }
+
+// Internal shapes returned by EU/Asia APIs
+interface TrafficCam {
+  id: string; title?: string; lat: number; lon: number;
+  country?: string; sourceCountry?: string; city?: string;
+}
+interface AsiaCam {
+  id: string; title: string; lat: number; lon: number;
+  country?: string; city?: string; sourceCountry?: string;
+}
 
 // ─── Seed cams shown on globe before API data arrives ───────────────────────
 const SEED_CAMS: GlobeCam[] = [
@@ -68,6 +83,9 @@ const SEED_CAMS: GlobeCam[] = [
   { lat: 59.33,  lon: 18.07,   title: 'Stockholm',               color: SOURCE_COLORS.osm,       source: 'osm'       },
 ];
 
+// Wide-angle bbox that covers the whole world for the Windy globe fetch
+const WORLD_BBOX = '90,180,-90,-180';
+
 export default function MapClient() {
   const [mode, setMode] = useState<'globe' | 'map'>('globe');
 
@@ -87,18 +105,23 @@ export default function MapClient() {
   const [earthCams,   setEarthCams]   = useState<EarthCamItem[]>([]);
   const [osmCams,     setOsmCams]     = useState<OsmWebcam[]>([]);
   const [deckCams,    setDeckCams]    = useState<DeckchairWebcam[]>([]);
-  const [windyCount,  setWindyCount]  = useState(0);
-  const [asiaCount,   setAsiaCount]   = useState(0);
-  const [euCount,     setEuCount]     = useState(0);
+  const [windyCams,   setWindyCams]   = useState<WindyWebcam[]>([]);
+  const [euCams,      setEuCams]      = useState<TrafficCam[]>([]);
+  const [asiaCams,    setAsiaCams]    = useState<AsiaCam[]>([]);
   const [loading,     setLoading]     = useState(false);
   const [errors,      setErrors]      = useState<string[]>([]);
+
+  // live windy count from the 2D map viewport layer (may differ from globe)
+  const [windyMapCount, setWindyMapCount] = useState(0);
+  const [asiaCount,     setAsiaCount]     = useState(0);
+  const [euCount,       setEuCount]       = useState(0);
 
   // ─── Fly-to: clicking a globe dot then entering map flies there ──────────
   const [flyTo, setFlyTo] = useState<FlyToTarget | null>(null);
 
-  const windyCountRef = useRef(windyCount);
+  const windyMapCountRef = useRef(windyMapCount);
   const handleWindyCount = useCallback((n: number) => {
-    if (n !== windyCountRef.current) { windyCountRef.current = n; setWindyCount(n); }
+    if (n !== windyMapCountRef.current) { windyMapCountRef.current = n; setWindyMapCount(n); }
   }, []);
 
   // ─── Fetch all cam data once on mount ───────────────────────────────────
@@ -130,6 +153,40 @@ export default function MapClient() {
           const j = await r.json();
           if (!r.ok) errs.push(`Deckchair: ${j?.error ?? r.statusText}`); else setDeckCams(toArray(j));
         }),
+        // EU traffic — same endpoint used by EUTrafficLayer
+        safe('EU', async () => {
+          const countries = Object.keys(EU_COUNTRIES).join(',');
+          const r = await fetch(`/api/eu-traffic?countries=${countries}`);
+          const j = await r.json();
+          if (!r.ok) errs.push(`EU: ${j?.error ?? r.statusText}`);
+          else {
+            const arr = (toArray<TrafficCam>(j)).filter(
+              c => c.lat && c.lon && isFinite(c.lat) && isFinite(c.lon)
+            );
+            setEuCams(arr);
+          }
+        }),
+        // Asia tourism + Singapore — same endpoints used by AsiaWebcamsLayer
+        safe('Asia', async () => {
+          const [sg, tourism] = await Promise.all([
+            fetch('/api/asia-traffic/singapore').then(r => r.json()).catch(() => []),
+            fetch('/api/asia-tourism').then(r => r.json()).catch(() => []),
+          ]);
+          const sgArr   = toArray<AsiaCam>(Array.isArray(sg) ? sg : (sg?.cameras ?? []));
+          const tourArr = toArray<AsiaCam>(tourism);
+          const all = [...sgArr, ...tourArr].filter(
+            c => c.lat && c.lon && isFinite(c.lat) && isFinite(c.lon) && c.title?.trim()
+          );
+          setAsiaCams(all);
+        }),
+        // Windy global bbox — best-effort, no crash if key missing
+        safe('Windy', async () => {
+          const r = await fetch(`/api/windy-webcams?bbox=${encodeURIComponent(WORLD_BBOX)}&limit=50`);
+          const j = await r.json();
+          if (j?.missingKey || !r.ok) return; // silently skip
+          const list: WindyWebcam[] = Array.isArray(j) ? j : (Array.isArray(j?.webcams) ? j.webcams : []);
+          setWindyCams(list);
+        }),
       ]);
       setErrors(errs); setLoading(false);
     };
@@ -139,6 +196,11 @@ export default function MapClient() {
   // ─── Build GlobeCam array from real API data ─────────────────────────────
   const globeCams: GlobeCam[] = useMemo(() => {
     const cams: GlobeCam[] = [];
+
+    if (visible.windy)
+      for (const c of windyCams)
+        if (c.location?.lat && c.location?.lon)
+          cams.push({ lat: c.location.lat, lon: c.location.lon, title: c.title ?? 'Windy', color: SOURCE_COLORS.windy, source: 'windy' });
 
     if (visible.skyline)
       for (const c of skylineCams)
@@ -160,9 +222,24 @@ export default function MapClient() {
         if (c.lat && c.lon)
           cams.push({ lat: c.lat, lon: c.lon, title: c.title ?? 'Deckchair', color: SOURCE_COLORS.deckchair, source: 'deckchair' });
 
+    // EU traffic cams — use per-country visibility
+    for (const c of euCams) {
+      const key = (c.sourceCountry ?? c.country ?? 'EU') in EU_COUNTRIES
+        ? (c.sourceCountry ?? c.country ?? 'EU') : 'EU';
+      if (euVisible[key] === false) continue;
+      cams.push({ lat: c.lat, lon: c.lon, title: c.title ?? 'EU Traffic', color: EU_GLOBE_COLOR, source: 'eu' });
+    }
+
+    // Asia cams — use per-country visibility
+    for (const c of asiaCams) {
+      const key = c.sourceCountry ?? c.country ?? 'SG';
+      if (asiaVisible[key] === false) continue;
+      cams.push({ lat: c.lat, lon: c.lon, title: c.title ?? 'Asia cam', color: ASIA_GLOBE_COLOR, source: 'asia' });
+    }
+
     // Fall back to seed cams while data is loading so globe looks populated
     return cams.length > 0 ? cams : SEED_CAMS.filter(c => visible[c.source as SourceKey] !== false);
-  }, [skylineCams, earthCams, osmCams, deckCams, visible]);
+  }, [windyCams, skylineCams, earthCams, osmCams, deckCams, euCams, asiaCams, visible, euVisible, asiaVisible]);
 
   // When a globe dot is clicked: store fly-to target and switch to map
   const handleGlobeCamClick = useCallback((cam: GlobeCam) => {
@@ -170,7 +247,7 @@ export default function MapClient() {
     setMode('map');
   }, []);
 
-  const grandTotal = windyCount + skylineCams.length + earthCams.length + osmCams.length + deckCams.length + asiaCount + euCount;
+  const grandTotal = windyMapCount + skylineCams.length + earthCams.length + osmCams.length + deckCams.length + asiaCount + euCount;
 
   return (
     <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden' }}>
@@ -212,6 +289,8 @@ export default function MapClient() {
           earthCams={earthCams}
           osmCams={osmCams}
           deckCams={deckCams}
+          euCams={euCams}
+          asiaCams={asiaCams}
           visible={visible}
           euVisible={euVisible}
           asiaVisible={asiaVisible}

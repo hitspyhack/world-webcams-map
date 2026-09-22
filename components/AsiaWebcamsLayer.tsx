@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import { Marker, Popup } from 'react-leaflet';
 
@@ -49,13 +49,23 @@ function isPopulated(cam: AsiaCam): boolean {
 
 interface Props {
   visible: Record<string, boolean>;
+  /**
+   * When provided, the layer renders these cams directly instead of fetching
+   * independently. MapClient passes its already-fetched array here so the
+   * globe and flat map share the same data without double network requests.
+   */
+  cams?: AsiaCam[];
   onLoad?: (count: number) => void;
 }
 
-export default function AsiaWebcamsLayer({ visible, onLoad }: Props) {
-  const [cams, setCams] = useState<AsiaCam[]>([]);
+export default function AsiaWebcamsLayer({ visible, cams: camsProp, onLoad }: Props) {
+  const [fetchedCams, setFetchedCams] = useState<AsiaCam[]>([]);
+  const onLoadRef = useRef(onLoad);
+  onLoadRef.current = onLoad;
 
+  // Only fetch independently when no cams prop is provided
   useEffect(() => {
+    if (camsProp !== undefined) return;
     Promise.all([
       fetch('/api/asia-traffic/singapore').then(r => r.json()).catch(() => []),
       fetch('/api/asia-tourism').then(r => r.json()).catch(() => []),
@@ -63,10 +73,23 @@ export default function AsiaWebcamsLayer({ visible, onLoad }: Props) {
       const sgArr   = Array.isArray(sg)      ? sg      : (sg?.cameras ?? []);
       const tourArr = Array.isArray(tourism) ? tourism : [];
       const all = ([...sgArr, ...tourArr] as AsiaCam[]).filter(isPopulated);
-      setCams(all);
-      onLoad?.(all.length);
+      setFetchedCams(all);
+      onLoadRef.current?.(all.length);
     });
-  }, [onLoad]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // When cams are passed from parent, notify count once
+  const notifiedRef = useRef(false);
+  useEffect(() => {
+    if (camsProp === undefined) return;
+    if (!notifiedRef.current && camsProp.length > 0) {
+      notifiedRef.current = true;
+      onLoadRef.current?.(camsProp.length);
+    }
+  }, [camsProp]);
+
+  const cams = camsProp !== undefined ? camsProp : fetchedCams;
 
   return (
     <>

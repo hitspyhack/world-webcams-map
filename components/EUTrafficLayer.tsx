@@ -65,42 +65,61 @@ const DEFAULT_ICON = makeIcon('https://unpkg.com/leaflet@1.9.4/dist/images/marke
  *  displayable element beyond its title (image URL, stream URL, or road data). */
 function isPopulated(cam: TrafficCam): boolean {
   if (!cam.lat || !cam.lon || !isFinite(cam.lat) || !isFinite(cam.lon)) return false;
-  // Must have at least a title or a URL — pure coordinate-only entries are useless on the map
   const hasContent =
     !!(cam.title?.trim()) ||
     !!(cam.imageUrl) ||
     !!(cam.sourceUrl) ||
     !!(cam.webcamUrl);
   if (!hasContent) return false;
-  // Require at least one actionable piece: an image to preview OR a link to follow
   return !!(cam.imageUrl || cam.sourceUrl || cam.webcamUrl || cam.roadCondition);
 }
 
 interface Props {
   visible: Record<string, boolean>;
-  /** Called once after the initial fetch resolves, with total camera count. */
+  /**
+   * When provided, the layer renders these cams directly instead of fetching
+   * from /api/eu-traffic. MapClient passes its already-fetched array here so
+   * there is only one network request for both the globe and the flat map.
+   */
+  cams?: TrafficCam[];
+  /** Called once after the data is ready, with total camera count. */
   onLoad?: (count: number) => void;
 }
 
-export default function EUTrafficLayer({ visible, onLoad }: Props) {
-  const [cams, setCams] = useState<TrafficCam[]>([]);
+export default function EUTrafficLayer({ visible, cams: camsProp, onLoad }: Props) {
+  const [fetchedCams, setFetchedCams] = useState<TrafficCam[]>([]);
   const [loading, setLoading] = useState(false);
   const onLoadRef = useRef(onLoad);
   onLoadRef.current = onLoad;
 
+  // Only fetch independently when no cams prop is provided
   useEffect(() => {
+    if (camsProp !== undefined) return;
     setLoading(true);
     const countries = Object.keys(EU_COUNTRIES).join(',');
     fetch(`/api/eu-traffic?countries=${countries}`)
       .then(r => r.json())
       .then(data => {
         const arr: TrafficCam[] = (Array.isArray(data) ? data : []).filter(isPopulated);
-        setCams(arr);
+        setFetchedCams(arr);
         onLoadRef.current?.(arr.length);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // When cams are passed from parent, notify count once
+  const notifiedRef = useRef(false);
+  useEffect(() => {
+    if (camsProp === undefined) return;
+    if (!notifiedRef.current && camsProp.length > 0) {
+      notifiedRef.current = true;
+      onLoadRef.current?.(camsProp.length);
+    }
+  }, [camsProp]);
+
+  const cams = camsProp !== undefined ? camsProp : fetchedCams;
 
   if (loading) return null;
 

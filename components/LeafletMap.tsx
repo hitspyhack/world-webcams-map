@@ -16,6 +16,21 @@ import type {
 import type { SourceKey, FlyToTarget } from './MapClient';
 
 function toArray<T>(val: unknown): T[] { return Array.isArray(val) ? (val as T[]) : []; }
+void toArray; // imported helper kept for potential future use
+
+// Internal shapes — must match what MapClient passes down
+interface TrafficCam {
+  id: string; title?: string; lat: number; lon: number;
+  country?: string; sourceCountry?: string; city?: string;
+  imageUrl?: string; sourceUrl?: string; webcamUrl?: string;
+  roadCondition?: string; airTemp?: number; county?: string;
+  photoTime?: string; operator?: string;
+}
+interface AsiaCam {
+  id: string; title: string; lat: number; lon: number;
+  country?: string; city?: string; sourceCountry?: string;
+  imageUrl?: string; sourceUrl?: string;
+}
 
 // SOURCE_CONFIG stays here (marker URLs only needed by the map)
 const SOURCE_CONFIG: Record<SourceKey, { label: string; color: string; markerUrl: string }> = {
@@ -86,6 +101,10 @@ interface LeafletMapProps {
   earthCams:     EarthCamItem[];
   osmCams:       OsmWebcam[];
   deckCams:      DeckchairWebcam[];
+  /** Pre-fetched EU traffic cams from MapClient (avoids duplicate request). */
+  euCams:        TrafficCam[];
+  /** Pre-fetched Asia cams from MapClient (avoids duplicate request). */
+  asiaCams:      AsiaCam[];
   visible:       Record<SourceKey, boolean>;
   euVisible:     Record<string, boolean>;
   asiaVisible:   Record<string, boolean>;
@@ -103,6 +122,7 @@ interface LeafletMapProps {
 
 export default function LeafletMap({
   skylineCams, earthCams, osmCams, deckCams,
+  euCams, asiaCams,
   visible, euVisible, asiaVisible,
   loading, errors,
   onWindyCount, onAsiaCount, onEuCount,
@@ -113,6 +133,10 @@ export default function LeafletMap({
   const handleWindyCount = useCallback((n: number) => {
     if (n !== windyCountRef.current) { windyCountRef.current = n; onWindyCount(n); }
   }, [onWindyCount]);
+
+  // Notify parent of EU/Asia counts whenever the pre-fetched arrays change
+  useEffect(() => { onEuCount(euCams.length); }, [euCams.length, onEuCount]);
+  useEffect(() => { onAsiaCount(asiaCams.length); }, [asiaCams.length, onAsiaCount]);
 
   const [openSection, setOpenSection] = useState<'global'|'eu'|'asia'>('global');
 
@@ -131,8 +155,6 @@ export default function LeafletMap({
   }, []);
 
   const globalTotal = (windyCountRef.current) + skylineCams.length + earthCams.length + osmCams.length + deckCams.length;
-  const euTotal = 0; // updated via onEuCount
-  void euTotal;
 
   const legendStyle: React.CSSProperties = {
     position: 'absolute', bottom: 24, right: 12, zIndex: 1000,
@@ -264,11 +286,16 @@ export default function LeafletMap({
           );
         })}
 
-        {/* EU Traffic */}
-        <EUTrafficLayer visible={euVisible} onLoad={onEuCount} />
+        {/*
+          EU Traffic — pass pre-fetched cams so the layer renders without
+          making a second network request. onLoad still called for count.
+        */}
+        <EUTrafficLayer cams={euCams} visible={euVisible} onLoad={onEuCount} />
 
-        {/* Asia */}
-        <AsiaWebcamsLayer visible={asiaVisible} onLoad={onAsiaCount} />
+        {/*
+          Asia — same pattern: render from pre-fetched data.
+        */}
+        <AsiaWebcamsLayer cams={asiaCams} visible={asiaVisible} onLoad={onAsiaCount} />
       </MapContainer>
 
       {/* Loading overlay */}

@@ -66,6 +66,15 @@ const SOURCE_LABELS: Record<SourceKey, string> = {
   windy: 'Windy', skyline: 'Skyline', earthcam: 'EarthCam', osm: 'OSM', deckchair: 'Deckchair',
 };
 
+// Dot size by source — EU/Asia get a slightly smaller dot so dense regions
+// don't become a solid blob, Windy get a slightly larger distinctive size.
+function dotRadius(source: string | undefined, hovered: boolean): number {
+  if (hovered) return HOVER_RADIUS;
+  if (source === 'eu' || source === 'asia') return 2.2;
+  if (source === 'windy') return 3.5;
+  return DOT_RADIUS;
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -150,7 +159,7 @@ export default function GlobeView({
       const dx = px - cx, dy = py - cy;
       if (dx * dx + dy * dy > radius * radius * 1.01) continue;
       const isHov = hov === cam;
-      const r = isHov ? HOVER_RADIUS : DOT_RADIUS;
+      const r = dotRadius(cam.source, isHov);
       ctx.save();
       ctx.beginPath(); ctx.arc(px, py, r + 1.5, 0, 2 * Math.PI);
       ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fill();
@@ -200,7 +209,7 @@ export default function GlobeView({
     return () => ro.disconnect();
   }, []);
 
-  // Hit-test
+  // Hit-test — slightly larger hit area for small EU/Asia dots
   const getCamAt = useCallback((ex: number, ey: number): GlobeCam | null => {
     const canvas = canvasRef.current, proj = projRef.current;
     if (!canvas || !proj) return null;
@@ -443,7 +452,7 @@ export default function GlobeView({
         zIndex: 10, fontSize: 10, color: 'rgba(0,180,80,0.4)',
         fontFamily: 'monospace', letterSpacing: '0.1em', pointerEvents: 'none',
       }}>
-        DRAG TO ROTATE · CLICK DOT TO OPEN IN MAP
+        DRAG TO ROTATE · CLICK DOT TO FLY TO IN MAP
       </div>
 
       {/* Cam tooltip */}
