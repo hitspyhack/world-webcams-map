@@ -8,6 +8,7 @@ import EUTrafficLayer,   { EU_COUNTRIES }  from './EUTrafficLayer';
 import WindyLayer from './WindyLayer';
 import CamLightbox from './CamLightbox';
 import type { CamLightboxEntry } from './CamLightbox';
+import type { CountryEntry } from './CountrySearch';
 import type {
   SkylineItem,
   EarthCamItem,
@@ -16,7 +17,6 @@ import type {
 } from '../types/webcam';
 import type { SourceKey, FlyToTarget } from './MapClient';
 
-// Internal shapes — must match what MapClient passes down
 interface TrafficCam {
   id: string; title?: string; lat: number; lon: number;
   country?: string; sourceCountry?: string; city?: string;
@@ -59,56 +59,37 @@ const TILE_FILTER_CSS = `
   .leaflet-control-attribution a { color: #30363d !important; }
   .leaflet-control-zoom a { background: rgba(22,27,34,0.95) !important; color: #8b949e !important; border-color: #30363d !important; }
   .leaflet-control-zoom a:hover { background: rgba(48,54,61,0.95) !important; color: #e6edf3 !important; }
-  .cam-expand-btn {
-    opacity: 0; transition: opacity 0.15s;
-  }
-  .cam-preview-wrap:hover .cam-expand-btn {
-    opacity: 1;
-  }
+  .cam-expand-btn { opacity: 0; transition: opacity 0.15s; }
+  .cam-preview-wrap:hover .cam-expand-btn { opacity: 1; }
 `;
 
-// ── Expandable preview thumbnail ────────────────────────────────────────────
-function ExpandablePreview({
-  src, alt, onExpand,
-}: { src: string; alt: string; onExpand: () => void }) {
+function ExpandablePreview({ src, alt, onExpand }: { src: string; alt: string; onExpand: () => void }) {
   if (!src) return null;
   return (
-    <div
-      className="cam-preview-wrap"
-      style={{ position: 'relative', marginTop: 7, cursor: 'pointer' }}
-      onClick={onExpand}
-      role="button"
-      tabIndex={0}
-      aria-label={`Expand ${alt}`}
+    <div className="cam-preview-wrap" style={{ position: 'relative', marginTop: 7, cursor: 'pointer' }}
+      onClick={onExpand} role="button" tabIndex={0} aria-label={`Expand ${alt}`}
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') onExpand(); }}
     >
-      <img
-        src={src} alt={alt}
+      <img src={src} alt={alt}
         style={{ maxWidth: 248, width: '100%', borderRadius: 6, display: 'block', background: '#0d1117' }}
-        loading="lazy"
-        onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+        loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
       />
-      <button
-        className="cam-expand-btn"
-        onClick={e => { e.stopPropagation(); onExpand(); }}
+      <button className="cam-expand-btn" onClick={e => { e.stopPropagation(); onExpand(); }}
         aria-label="Expand to full view"
         style={{
           position: 'absolute', top: 6, right: 6,
           background: 'rgba(13,17,23,0.85)', border: '1px solid rgba(255,255,255,0.15)',
           color: '#e6edf3', borderRadius: 6, padding: '3px 7px',
-          fontSize: 13, cursor: 'pointer', lineHeight: 1,
-          backdropFilter: 'blur(4px)',
+          fontSize: 13, cursor: 'pointer', lineHeight: 1, backdropFilter: 'blur(4px)',
         }}
       >⛶</button>
     </div>
   );
 }
 
-// ── No-preview expand button (OSM: no image, just a link) ────────────────────
 function ExpandBtn({ onExpand, label }: { onExpand: () => void; label: string }) {
   return (
-    <button
-      onClick={onExpand}
+    <button onClick={onExpand}
       style={{
         marginTop: 7, width: '100%',
         background: 'rgba(48,54,61,0.7)', border: '1px solid #30363d',
@@ -118,9 +99,7 @@ function ExpandBtn({ onExpand, label }: { onExpand: () => void; label: string })
       }}
       onMouseEnter={e => { e.currentTarget.style.background = 'rgba(88,166,255,0.12)'; }}
       onMouseLeave={e => { e.currentTarget.style.background = 'rgba(48,54,61,0.7)'; }}
-    >
-      ⛶ {label}
-    </button>
+    >⛶ {label}</button>
   );
 }
 
@@ -132,7 +111,6 @@ function SourceBadge({ label, color }: { label: string; color: string }) {
   return <div style={{ marginTop: 5, fontSize: 10, fontWeight: 700, color, letterSpacing: '0.04em' }}>SOURCE: {label}</div>;
 }
 
-// ── FlyTo controller ─────────────────────────────────────────────────────────
 function FlyToController({ target, onDone }: { target: FlyToTarget | null; onDone: () => void }) {
   const map = useMap();
   const doneRef = useRef(false);
@@ -146,7 +124,6 @@ function FlyToController({ target, onDone }: { target: FlyToTarget | null; onDon
   return null;
 }
 
-// ── Props ─────────────────────────────────────────────────────────────────────
 interface LeafletMapProps {
   skylineCams:   SkylineItem[];
   earthCams:     EarthCamItem[];
@@ -167,6 +144,8 @@ interface LeafletMapProps {
   onToggleAsia:  (key: string) => void;
   flyTo:         FlyToTarget | null;
   onFlyToDone:   () => void;
+  countryFilter: CountryEntry | null;
+  onClearFilter: () => void;
 }
 
 export default function LeafletMap({
@@ -177,6 +156,7 @@ export default function LeafletMap({
   onWindyCount, onAsiaCount, onEuCount,
   onToggleSource, onToggleEu, onToggleAsia,
   flyTo, onFlyToDone,
+  countryFilter, onClearFilter,
 }: LeafletMapProps) {
   const windyCountRef = useRef(0);
   const handleWindyCount = useCallback((n: number) => {
@@ -187,10 +167,8 @@ export default function LeafletMap({
   useEffect(() => { onAsiaCount(asiaCams.length); }, [asiaCams.length, onAsiaCount]);
 
   const [openSection, setOpenSection] = useState<'global'|'eu'|'asia'>('global');
-
-  // ── Lightbox state ────────────────────────────────────────────────────────
   const [lightbox, setLightbox] = useState<CamLightboxEntry | null>(null);
-  const openLightbox = useCallback((entry: CamLightboxEntry) => setLightbox(entry), []);
+  const openLightbox  = useCallback((entry: CamLightboxEntry) => setLightbox(entry), []);
   const closeLightbox = useCallback(() => setLightbox(null), []);
 
   const icons = useMemo(() => {
@@ -220,8 +198,7 @@ export default function LeafletMap({
   };
 
   const sectionBtn = (key: 'global'|'eu'|'asia', label: string) => (
-    <button
-      onClick={() => setOpenSection(s => s === key ? 'global' : key)}
+    <button onClick={() => setOpenSection(s => s === key ? 'global' : key)}
       style={{
         background: openSection === key ? 'rgba(88,166,255,0.10)' : 'transparent',
         border: openSection === key ? '1px solid rgba(88,166,255,0.2)' : '1px solid transparent',
@@ -240,8 +217,7 @@ export default function LeafletMap({
   ) => (
     <label key={key} style={{
       display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer',
-      opacity: state[key] ? 1 : 0.35, transition: 'opacity 0.2s',
-      padding: '2px 0',
+      opacity: state[key] ? 1 : 0.35, transition: 'opacity 0.2s', padding: '2px 0',
     }}>
       <input type="checkbox" checked={!!state[key]} onChange={() => onToggle(key)}
         style={{ accentColor: color, cursor: 'pointer', width: 13, height: 13 }} />
@@ -253,21 +229,17 @@ export default function LeafletMap({
 
   return (
     <div style={{ position: 'relative', width: '100vw', height: '100vh' }}>
-      <MapContainer
-        center={[20, 0]} zoom={3} style={{ width: '100%', height: '100%' }}
-        zoomControl={true} preferCanvas={true}
-      >
+      <MapContainer center={[20, 0]} zoom={3} style={{ width: '100%', height: '100%' }} zoomControl={true} preferCanvas={true}>
         <TileLayer url={OSM_URL} attribution={OSM_ATTR} />
         <FlyToController target={flyTo} onDone={onFlyToDone} />
 
-        {/* Windy — live viewport fetch, lightbox wired */}
         <WindyLayer
           enabled={visible.windy}
           onCountChange={handleWindyCount}
           onExpand={openLightbox}
+          countryFilter={countryFilter ?? undefined}
         />
 
-        {/* Skyline — snapshot image; no embed available */}
         {visible.skyline && skylineCams.map(cam => {
           if (!cam.lat || !cam.lon) return null;
           const title = cam.title ?? 'Skyline cam';
@@ -277,15 +249,8 @@ export default function LeafletMap({
                 <div style={{ fontFamily: 'system-ui' }}>
                   <strong style={{ fontSize: 13 }}>{title}</strong>
                   {cam.city && <div style={{ fontSize: 11, color: '#8b949e', marginTop: 2 }}>{cam.city}{cam.country ? ` · ${cam.country}` : ''}</div>}
-                  <ExpandablePreview
-                    src={cam.snapshotUrl ?? ''}
-                    alt={title}
-                    onExpand={() => openLightbox({
-                      source: 'skyline', title,
-                      imageUrl: cam.snapshotUrl,
-                      linkUrl: cam.url,
-                      linkLabel: 'Open on Skyline',
-                    })}
+                  <ExpandablePreview src={cam.snapshotUrl ?? ''} alt={title}
+                    onExpand={() => openLightbox({ source: 'skyline', title, imageUrl: cam.snapshotUrl, linkUrl: cam.url, linkLabel: 'Open on Skyline' })}
                   />
                   <PopupLink href={cam.url ?? ''} label="Open on Skyline" />
                   <SourceBadge label="SKYLINE" color={SOURCE_CONFIG.skyline.color} />
@@ -295,7 +260,6 @@ export default function LeafletMap({
           );
         })}
 
-        {/* EarthCam — embedUrl is the live iframe */}
         {visible.earthcam && earthCams.map((cam) => {
           if (!cam.lat || !cam.lon) return null;
           const title = cam.title ?? 'EarthCam';
@@ -305,16 +269,8 @@ export default function LeafletMap({
                 <div style={{ fontFamily: 'system-ui' }}>
                   <strong style={{ fontSize: 13 }}>{title}</strong>
                   {cam.city && <div style={{ fontSize: 11, color: '#8b949e', marginTop: 2 }}>{cam.city}{cam.country ? ` · ${cam.country}` : ''}</div>}
-                  <ExpandablePreview
-                    src={cam.imageUrl ?? ''}
-                    alt={title}
-                    onExpand={() => openLightbox({
-                      source: 'earthcam', title,
-                      embedUrl: cam.embedUrl,
-                      imageUrl: cam.imageUrl,
-                      linkUrl: cam.embedUrl,
-                      linkLabel: 'Open on EarthCam',
-                    })}
+                  <ExpandablePreview src={cam.imageUrl ?? ''} alt={title}
+                    onExpand={() => openLightbox({ source: 'earthcam', title, embedUrl: cam.embedUrl, imageUrl: cam.imageUrl, linkUrl: cam.embedUrl, linkLabel: 'Open on EarthCam' })}
                   />
                   <PopupLink href={cam.embedUrl ?? ''} label="View on EarthCam" />
                   <SourceBadge label="EARTHCAM" color={SOURCE_CONFIG.earthcam.color} />
@@ -324,7 +280,6 @@ export default function LeafletMap({
           );
         })}
 
-        {/* OSM — no embeddable content; expand shows link CTA */}
         {visible.osm && osmCams.map((cam) => {
           if (!cam.lat || !cam.lon) return null;
           const title = cam.title ?? cam.name ?? 'OSM webcam';
@@ -335,13 +290,8 @@ export default function LeafletMap({
                   <strong style={{ fontSize: 13 }}>{title}</strong>
                   {cam.city && <div style={{ fontSize: 11, color: '#8b949e', marginTop: 2 }}>{cam.city}{cam.country ? ` · ${cam.country}` : ''}</div>}
                   {cam.webcamUrl && (
-                    <ExpandBtn
-                      label="View live feed"
-                      onExpand={() => openLightbox({
-                        source: 'osm', title,
-                        linkUrl: cam.webcamUrl,
-                        linkLabel: 'Open webcam',
-                      })}
+                    <ExpandBtn label="View live feed"
+                      onExpand={() => openLightbox({ source: 'osm', title, linkUrl: cam.webcamUrl, linkLabel: 'Open webcam' })}
                     />
                   )}
                   <PopupLink href={cam.webcamUrl ?? ''} label="Open webcam" />
@@ -352,7 +302,6 @@ export default function LeafletMap({
           );
         })}
 
-        {/* Deckchair — embedUrl is the live stream iframe */}
         {visible.deckchair && deckCams.map((cam) => {
           if (!cam.lat || !cam.lon) return null;
           const title = cam.title ?? 'Deckchair';
@@ -361,16 +310,8 @@ export default function LeafletMap({
               <Popup maxWidth={270}>
                 <div style={{ fontFamily: 'system-ui' }}>
                   <strong style={{ fontSize: 13 }}>{title}</strong>
-                  <ExpandablePreview
-                    src={cam.thumbnailUrl ?? ''}
-                    alt={title}
-                    onExpand={() => openLightbox({
-                      source: 'deckchair', title,
-                      embedUrl: cam.embedUrl,
-                      imageUrl: cam.thumbnailUrl,
-                      linkUrl: cam.embedUrl,
-                      linkLabel: 'View stream',
-                    })}
+                  <ExpandablePreview src={cam.thumbnailUrl ?? ''} alt={title}
+                    onExpand={() => openLightbox({ source: 'deckchair', title, embedUrl: cam.embedUrl, imageUrl: cam.thumbnailUrl, linkUrl: cam.embedUrl, linkLabel: 'View stream' })}
                   />
                   <PopupLink href={cam.embedUrl ?? ''} label="View stream" />
                   <SourceBadge label="DECKCHAIR" color={SOURCE_CONFIG.deckchair.color} />
@@ -380,30 +321,19 @@ export default function LeafletMap({
           );
         })}
 
-        <EUTrafficLayer
-          cams={euCams} visible={euVisible} onLoad={onEuCount}
-          onExpand={openLightbox}
-        />
-        <AsiaWebcamsLayer
-          cams={asiaCams} visible={asiaVisible} onLoad={onAsiaCount}
-          onExpand={openLightbox}
-        />
+        <EUTrafficLayer cams={euCams} visible={euVisible} onLoad={onEuCount} onExpand={openLightbox} />
+        <AsiaWebcamsLayer cams={asiaCams} visible={asiaVisible} onLoad={onAsiaCount} onExpand={openLightbox} />
       </MapContainer>
 
-      {/* Lightbox — portal-rendered above everything */}
       <CamLightbox entry={lightbox} onClose={closeLightbox} />
 
-      {/* Loading overlay */}
       {loading && (
         <div style={{
           position: 'absolute', top: 60, left: '50%', transform: 'translateX(-50%)',
           zIndex: 1100, background: 'rgba(13,17,23,0.9)',
           color: '#58a6ff', fontFamily: 'monospace', fontSize: 12,
-          padding: '6px 14px', borderRadius: 8, border: '1px solid #30363d',
-          letterSpacing: '0.08em',
-        }}>
-          ⟳ Loading cameras…
-        </div>
+          padding: '6px 14px', borderRadius: 8, border: '1px solid #30363d', letterSpacing: '0.08em',
+        }}>⟳ Loading cameras…</div>
       )}
 
       {errors.length > 0 && (
@@ -413,13 +343,34 @@ export default function LeafletMap({
           color: '#f87171', fontFamily: 'monospace', fontSize: 11,
           padding: '5px 12px', borderRadius: 8, border: '1px solid #f8717140',
           maxWidth: 320, textAlign: 'center',
-        }}>
-          ⚠ {errors.join(' · ')}
-        </div>
+        }}>⚠ {errors.join(' · ')}</div>
       )}
 
       {/* Legend */}
       <div style={legendStyle}>
+        {/* Active country filter badge */}
+        {countryFilter && (
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            background: 'rgba(88,166,255,0.10)',
+            border: '1px solid rgba(88,166,255,0.3)',
+            borderRadius: 7, padding: '5px 8px', marginBottom: 2,
+          }}>
+            <span style={{ fontSize: 11, color: '#79c0ff', fontWeight: 600 }}>
+              🔍 {countryFilter.name}
+            </span>
+            <button onClick={onClearFilter} aria-label="Clear country filter"
+              style={{
+                background: 'none', border: 'none', color: '#8b949e',
+                fontSize: 13, cursor: 'pointer', lineHeight: 1, padding: '0 2px',
+                transition: 'color 0.15s',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.color = '#f87171')}
+              onMouseLeave={e => (e.currentTarget.style.color = '#8b949e')}
+            >✕</button>
+          </div>
+        )}
+
         <div style={{ fontWeight: 700, fontSize: 12, letterSpacing: '0.05em', color: '#58a6ff', marginBottom: 2 }}>
           ◉ CAMERA SOURCES
           <span style={{ float: 'right', fontWeight: 400, color: '#8b949e', fontSize: 11 }}>{globalTotal.toLocaleString()}</span>
