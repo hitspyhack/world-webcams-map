@@ -13,5 +13,49 @@ html, body, #__next {
 
 body {
   font-family: Arial, Helvetica, sans-serif;
-  background: #0b1220;
+  background: #0d1117;
+}
+
+/* ── Dark Leaflet popups ── */
+.leaflet-popup-content-wrapper {
+  background: #161b22 !important;
+  color: #e6edf3 !important;
+  border: 1px solid #30363d !important;
+  border-radius: 10px !important;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6) !important;
+}
+.leaflet-popup-tip {
+  background: #161b22 !important;
+}
+.leaflet-popup-content a {
+  color: #58a6ff !important;
+}
+.leaflet-popup-content a:hover {
+  color: #79c0ff !important;
+}
+.leaflet-popup-close-button {
+  color: #8b949e !important;
+}
+.leaflet-popup-close-button:hover {
+  color: #e6edf3 !important;
+}
+
+/* ── Dark attribution ── */
+.leaflet-control-attribution {
+  background: rgba(13,17,23,0.82) !important;
+  color: #484f58 !important;
+}
+.leaflet-control-attribution a {
+  color: #484f58 !important;
+}
+
+/* ── Dark zoom controls ── */
+.leaflet-control-zoom a {
+  background: #161b22 !important;
+  color: #e6edf3 !important;
+  border-color: #30363d !important;
+}
+.leaflet-control-zoom a:hover {
+  background: #21262d !important;
+  color: #fff !important;
 }
