@@ -31,15 +31,11 @@ function makeIcon(url: string) {
 
 // ---- Component ----
 export default function LeafletMap() {
-  // ── Windy count is now driven by <WindyLayer> via callback ──
+  // ── Windy count driven by <WindyLayer> via callback ──
   const [windyCount,  setWindyCount]  = useState(0);
   const windyCountRef = useRef(windyCount);
-  // Stable callback so WindyLayer doesn't re-render on every parent re-render
   const handleWindyCount = useCallback((n: number) => {
-    if (n !== windyCountRef.current) {
-      windyCountRef.current = n;
-      setWindyCount(n);
-    }
+    if (n !== windyCountRef.current) { windyCountRef.current = n; setWindyCount(n); }
   }, []);
 
   const [skylineCams, setSkylineCams] = useState<SkylineItem[]>([]);
@@ -50,7 +46,6 @@ export default function LeafletMap() {
   const [errors,      setErrors]      = useState<string[]>([]);
   const [asiaCount,   setAsiaCount]   = useState(0);
   const [euCount,     setEuCount]     = useState(0);
-  // panel section collapse
   const [openSection, setOpenSection] = useState<'global'|'eu'|'asia'>('global');
 
   const [visible, setVisible] = useState<Record<SourceKey, boolean>>(
@@ -78,8 +73,13 @@ export default function LeafletMap() {
         try { await fn(); } catch (e: unknown) { errs.push(`${label}: ${e instanceof Error ? e.message : String(e)}`); }
       };
       await Promise.all([
+        // Skyline: no location arg → route uses DEFAULT_LOCATIONS fan-out
         safe('Skyline', async () => {
-          const r = await fetch('/api/skyline-webcams', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'Rome' }) });
+          const r = await fetch('/api/skyline-webcams', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),       // ← empty body triggers multi-location default
+          });
           const j = await r.json();
           if (!r.ok) errs.push(`Skyline: ${j?.error ?? r.statusText}`);
           else setSkylineCams(toArray(j));
@@ -143,18 +143,51 @@ export default function LeafletMap() {
           limit={50}
         />
 
-        {/* ── Skyline ── */}
+        {/* ── Skyline ──
+             Fields now read from the normalised flat shape the route returns:
+             cam.lat / cam.lon (not cam.gps.lat/lon)
+             cam.url           (not cam.gps, which never existed)
+        */}
         {visible.skyline && skylineCams.map(cam => {
-          const gps = cam.gps; if (!gps) return null;
-          const { lat, lon } = gps; if (lat == null || lon == null) return null;
+          if (!cam.lat || !cam.lon) return null;
           return (
-            <Marker key={`skyline-${cam.id ?? `${lat}-${lon}`}`} position={[lat, lon]} icon={icons.skyline}>
+            <Marker key={`skyline-${cam.id}`} position={[cam.lat, cam.lon]} icon={icons.skyline}>
               <Popup maxWidth={260}>
-                <strong>{cam.title ?? 'Skyline webcam'}</strong><br />
-                <span style={{ fontSize: 11, color: '#666' }}>{[cam.town, cam.country].filter(Boolean).join(', ')}</span>
-                {cam.snapshotUrl && <div style={{ marginTop: 6 }}><img src={cam.snapshotUrl} alt={cam.title ?? ''} style={{ maxWidth: 240, borderRadius: 5 }} loading="lazy" /></div>}
-                {cam.url && <div style={{ marginTop: 4 }}><a href={cam.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11 }}>Open on Skyline ↗</a></div>}
-                <div style={{ marginTop: 4, fontSize: 10, color: '#ef4444', fontWeight: 600 }}>SOURCE: SKYLINE</div>
+                <strong>{cam.title}</strong><br />
+                <span style={{ fontSize: 11, color: '#666' }}>
+                  {[cam.city, cam.country].filter(Boolean).join(', ')}
+                </span>
+                {cam.tags?.length > 0 && (
+                  <span style={{ fontSize: 10, color: '#888', marginLeft: 5 }}>
+                    {cam.tags.map(t => `#${t}`).join(' ')}
+                  </span>
+                )}
+                {cam.weather?.temp && (
+                  <div style={{ fontSize: 11, color: '#555', marginTop: 3 }}>
+                    {cam.weather.temp} • {cam.weather.condition}
+                  </div>
+                )}
+                {cam.snapshotUrl && (
+                  <div style={{ marginTop: 6 }}>
+                    <img
+                      src={cam.snapshotUrl}
+                      alt={cam.title}
+                      style={{ maxWidth: 240, borderRadius: 5 }}
+                      loading="lazy"
+                      onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                    />
+                  </div>
+                )}
+                {cam.url && (
+                  <div style={{ marginTop: 4 }}>
+                    <a href={cam.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11 }}>
+                      Open on Skyline ↗
+                    </a>
+                  </div>
+                )}
+                <div style={{ marginTop: 4, fontSize: 10, color: '#ef4444', fontWeight: 600 }}>
+                  SOURCE: SKYLINE
+                </div>
               </Popup>
             </Marker>
           );
@@ -210,7 +243,6 @@ export default function LeafletMap() {
         <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 2 }}>🌍 World Webcams</div>
         <div style={{ fontSize: 11, color: '#aaa', marginBottom: 4 }}>{grandTotal.toLocaleString()} cameras loaded</div>
 
-        {/* Global sources */}
         {sectionBtn('global', `GLOBAL SOURCES (${globalTotal})`)}
         {openSection === 'global' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 4 }}>
@@ -221,7 +253,6 @@ export default function LeafletMap() {
           </div>
         )}
 
-        {/* EU Traffic */}
         {sectionBtn('eu', `EU TRAFFIC (${euCount})`)}
         {openSection === 'eu' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 4 }}>
@@ -231,7 +262,6 @@ export default function LeafletMap() {
           </div>
         )}
 
-        {/* Asia */}
         {sectionBtn('asia', `ASIA (${asiaCount})`)}
         {openSection === 'asia' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 4 }}>
@@ -242,14 +272,12 @@ export default function LeafletMap() {
         )}
       </div>
 
-      {/* Loading indicator for non-Windy sources */}
       {loading && (
         <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 1000, padding: '8px 14px', background: 'rgba(11,18,32,0.88)', color: '#fff', borderRadius: 8, fontSize: 13, backdropFilter: 'blur(6px)' }}>
           Loading webcam sources…
         </div>
       )}
 
-      {/* Error banners */}
       {errors.map((msg, i) => (
         <div key={i} style={{ position: 'absolute', top: 12 + i * 44, left: 12, zIndex: 1000, padding: '8px 14px', background: 'rgba(161,44,68,0.9)', color: '#fff', borderRadius: 8, fontSize: 12, maxWidth: 360 }}>
           ⚠ {msg}

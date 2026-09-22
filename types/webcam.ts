@@ -37,20 +37,39 @@ export interface WindyWebcam {
 }
 
 // ── Skyline (via Apify actor) ────────────────────────────────────────────────
+// The Apify actor normalises its output before returning to the client:
+// coords live at enrichment.location.lat/lon (town centroid, geocoded).
+// The route.ts normalises to this flat shape before sending to the browser.
 
-export interface SkylineGps {
-  lat: number;
-  lon: number;
+export interface SkylineWeather {
+  temp?: string;
+  condition?: string;
+  wind?: string;
 }
 
 export interface SkylineItem {
-  id?: string;
-  title?: string;
-  url?: string;
-  snapshotUrl?: string;
-  gps?: SkylineGps;
-  town?: string;
-  country?: string;
+  /** visionSyncId from actor, or url, or "lat-lon" fallback */
+  id: string;
+  /** Canonical SkylineWebcams page URL */
+  url: string;
+  /** Title with boilerplate stripped */
+  title: string;
+  /** Live snapshot URL (embed.skylinewebcams.com/img/<id>.jpg) */
+  snapshotUrl: string;
+  /** Town latitude (geocoded centroid) */
+  lat: number;
+  /** Town longitude (geocoded centroid) */
+  lon: number;
+  /** Town name */
+  city: string;
+  /** Country name */
+  country: string;
+  /** ISO 3166-1 alpha-2 country code */
+  countryCode: string;
+  /** Auto-tags: beach, city, mountain, wildlife, traffic, landmark */
+  tags: string[];
+  /** Current weather at camera location */
+  weather?: SkylineWeather;
 }
 
 // ── EarthCam (static dataset) ────────────────────────────────────────────────
