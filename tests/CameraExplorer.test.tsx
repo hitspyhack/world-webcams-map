@@ -10,11 +10,11 @@ const cameras = [
 ];
 const feeds = Object.fromEntries(Object.keys(FEEDS).map(key => [key, { data: [], status: 'ready' } as FeedState])) as FeedStates;
 const storageKey = 'world-webcams:saved:v1';
-function setup() {
+function setup(cameraList = cameras) {
   const onOpen = vi.fn();
   const onLocate = vi.fn();
   const onRefresh = vi.fn();
-  const view = render(<CameraExplorer cameras={cameras} feeds={feeds} onOpen={onOpen} onLocate={onLocate} onRefresh={onRefresh} />);
+  const view = render(<CameraExplorer cameras={cameraList} feeds={feeds} onOpen={onOpen} onLocate={onLocate} onRefresh={onRefresh} />);
   return { user: userEvent.setup(), onOpen, onLocate, onRefresh, ...view };
 }
 beforeEach(() => localStorage.clear());
@@ -27,6 +27,35 @@ describe('camera explorer', () => {
     expect(screen.queryByRole('button', { name: 'Lisbon river' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Surprise me/ }));
     expect(onOpen).toHaveBeenCalledWith(cameras[0]);
+  });
+  it('filters cameras around geographic coordinates', async () => {
+    const { user } = setup();
+    await user.click(screen.getByRole('button', { name: /Explore cameras/ }));
+    await user.type(screen.getByLabelText('Latitude'), '38');
+    await user.type(screen.getByLabelText('Longitude'), '-9');
+    expect(screen.getByRole('button', { name: 'Lisbon river' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'São Paulo skyline' })).not.toBeInTheDocument();
+  });
+  it('creates and saves cameras into named local collections', async () => {
+    const { user } = setup();
+    await user.click(screen.getByRole('button', { name: /Explore cameras/ }));
+    await user.type(screen.getByLabelText('New collection name'), 'Coast');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+    await user.click(screen.getByRole('button', { name: 'Save Lisbon river' }));
+    await user.click(screen.getByRole('button', { name: 'Saved (1)' }));
+    expect(screen.getByRole('button', { name: 'Lisbon river' })).toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem(storageKey)!)[0]).toMatchObject({ collection: 'Coast' });
+    expect(JSON.parse(localStorage.getItem('world-webcams:collections:v1')!)).toContain('Coast');
+  });
+  it('does not proxy snapshot downloads when the provider blocks browser access', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError('CORS blocked'));
+    vi.stubGlobal('fetch', fetchMock);
+    const snapshotCamera = { ...cameras[0], imageUrl: 'https://camera.example/snapshot.jpg' };
+    const { user } = setup([snapshotCamera]);
+    await user.click(screen.getByRole('button', { name: /Explore cameras/ }));
+    await user.click(screen.getByRole('button', { name: 'Download timestamped snapshot of São Paulo skyline' }));
+    expect(fetchMock).toHaveBeenCalledWith('https://camera.example/snapshot.jpg', { mode: 'cors', credentials: 'omit' });
+    expect(await screen.findByText(/provider may block browser capture/)).toBeInTheDocument();
   });
   it('saves across remounts and allows removal', async () => {
     const first = setup();

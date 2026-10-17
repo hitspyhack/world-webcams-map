@@ -16,6 +16,83 @@ export function normalizeSearch(text: string): string {
   return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
 }
 
+export function distanceKm(latA: number, lonA: number, latB: number, lonB: number): number {
+  const radians = (degrees: number) => degrees * Math.PI / 180;
+  const deltaLat = radians(latB - latA);
+  const deltaLon = radians(lonB - lonA);
+  const arc = Math.sin(deltaLat / 2) ** 2
+    + Math.cos(radians(latA)) * Math.cos(radians(latB)) * Math.sin(deltaLon / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(arc), Math.sqrt(1 - arc));
+}
+
+export function cameraContextUrls(lat: number, lon: number) {
+  const point = `${lat},${lon}`;
+  return {
+    googleMaps: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(point)}`,
+    streetView: `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${encodeURIComponent(point)}`,
+  };
+}
+
+export function timestampedCaptureFilename(camera: GlobeCam, capturedAt: Date, contentType: string): string {
+  const slug = `${camera.source ?? 'webcam'}-${camera.title}`
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80) || 'webcam';
+  const extension = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg';
+  const timestamp = capturedAt.toISOString().replace(/[:.]/g, '-');
+  return `${slug}-${timestamp}.${extension}`;
+}
+
+export function exportCameras(cameras: GlobeCam[], format: 'csv' | 'geojson', exportedAt = new Date().toISOString()): string {
+  const records = cameras.map(camera => {
+    const context = cameraContextUrls(camera.lat, camera.lon);
+    return {
+      title: camera.title,
+      source: camera.source ?? 'unknown',
+      sourceUrl: camera.linkUrl ?? '',
+      latitude: camera.lat,
+      longitude: camera.lon,
+      city: camera.city ?? '',
+      country: camera.country ?? '',
+      categories: (camera.categories ?? []).join('; '),
+      media: camera.embedUrl ? 'player-link' : camera.imageUrl ? 'snapshot' : 'link-only',
+      capturedAt: camera.captureAt ?? '',
+      checkedAt: camera.checkedAt ? new Date(camera.checkedAt).toISOString() : '',
+      googleMapsUrl: context.googleMaps,
+      streetViewUrl: context.streetView,
+      attribution: `Source: ${camera.source ?? 'unknown'}${camera.linkUrl ? ` (${camera.linkUrl})` : ''}`,
+    };
+  });
+
+  if (format === 'geojson') {
+    return JSON.stringify({
+      type: 'FeatureCollection',
+      exportedAt,
+      features: records.map(record => ({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [record.longitude, record.latitude] },
+        properties: { ...record },
+      })),
+    }, null, 2);
+  }
+
+  const columns = Object.keys(records[0] ?? {
+    title: '', source: '', sourceUrl: '', latitude: '', longitude: '', city: '', country: '', categories: '',
+    media: '', capturedAt: '', checkedAt: '', googleMapsUrl: '', streetViewUrl: '', attribution: '',
+  });
+  const escape = (value: unknown) => `"${String(value).replaceAll('"', '""')}"`;
+  return [columns.map(escape).join(','), ...records.map(record => columns.map(key => escape(record[key as keyof typeof record])).join(','))].join('\r\n');
+}
+
+export function readCameraCollections(raw: string | null): string[] {
+  if (!raw) return ['Favorites'];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return ['Favorites'];
+    const names = parsed.flatMap(value => typeof value === 'string' && value.trim() ? [value.trim().slice(0, 60)] : []);
+    return ['Favorites', ...new Set(names.filter(name => name !== 'Favorites'))].slice(0, 100);
+  } catch { return ['Favorites']; }
+}
+
 export function isPublicWebUrl(value: unknown): value is string {
   if (typeof value !== 'string') return false;
   try { return ['https:', 'http:'].includes(new URL(value).protocol); } catch { return false; }
@@ -39,6 +116,12 @@ export function readSavedCameras(raw: string | null): GlobeCam[] {
         imageUrl: isPublicWebUrl(item.imageUrl) ? item.imageUrl : undefined,
         embedUrl: isPublicWebUrl(item.embedUrl) ? item.embedUrl : undefined,
         linkUrl: isPublicWebUrl(item.linkUrl) ? item.linkUrl : undefined,
+        city: typeof item.city === 'string' ? item.city.slice(0, 100) : undefined,
+        country: typeof item.country === 'string' ? item.country.slice(0, 100) : undefined,
+        categories: Array.isArray(item.categories) ? item.categories.flatMap(value => typeof value === 'string' ? [value.slice(0, 60)] : []).slice(0, 30) : undefined,
+        captureAt: typeof item.captureAt === 'string' && Number.isFinite(Date.parse(item.captureAt)) ? item.captureAt.slice(0, 40) : undefined,
+        checkedAt: typeof item.checkedAt === 'number' && Number.isFinite(item.checkedAt) ? item.checkedAt : undefined,
+        collection: typeof item.collection === 'string' && item.collection.trim() ? item.collection.trim().slice(0, 60) : undefined,
       };
       const key = cameraKey(camera);
       if (seen.has(key)) return [];

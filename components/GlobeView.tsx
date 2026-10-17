@@ -19,9 +19,15 @@ export interface GlobeCam {
   title: string;
   color: string;
   source?: string;
+  city?: string;
+  country?: string;
+  categories?: string[];
   embedUrl?: string;
   imageUrl?: string;
   linkUrl?:  string;
+  captureAt?: string;
+  checkedAt?: number;
+  collection?: string;
 }
 
 /** Methods exposed to the parent via ref */
@@ -58,6 +64,8 @@ const DOT_RADIUS   = 3;
 const HOVER_RADIUS = 6;
 const FPS_CAP      = 40;
 const FRAME_MS     = 1000 / FPS_CAP;
+const MIN_GLOBE_ZOOM = 0.65;
+const MAX_GLOBE_ZOOM = 3.5;
 
 const COUNTRIES = feature(world as unknown as Topology, world.objects.countries as GeometryCollection);
 
@@ -199,8 +207,19 @@ const GlobeView = forwardRef<GlobeViewHandle, Props>(function GlobeView({
   const hoveredRef   = useRef<GlobeCam | null>(null);
   const tooltipRef   = useRef<HTMLDivElement | null>(null);
   const lastTouchRef = useRef<{ x: number; y: number } | null>(null);
+  const pinchDistanceRef = useRef<number | null>(null);
+  const zoomRef = useRef(1);
 
   const [spinning, setSpinning] = useState(true);
+  const [zoom, setZoom] = useState(1);
+
+  const changeZoom = useCallback((factor: number) => {
+    setZoom(current => {
+      const next = Math.max(MIN_GLOBE_ZOOM, Math.min(MAX_GLOBE_ZOOM, current * factor));
+      zoomRef.current = next;
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     const preference = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -235,7 +254,7 @@ const GlobeView = forwardRef<GlobeViewHandle, Props>(function GlobeView({
     if (W === 0 || H === 0) { rafRef.current = requestAnimationFrame(draw); return; }
 
     const cx = W / 2, cy = H / 2;
-    const radius = Math.min(W, H) * 0.42;
+    const radius = Math.min(W, H) * 0.42 * zoomRef.current;
 
     if (spinning && !pauseRef.current && !dragRef.current.active)
       rotRef.current = [rotRef.current[0] + SPIN_SPEED, rotRef.current[1], 0];
@@ -334,7 +353,7 @@ const GlobeView = forwardRef<GlobeViewHandle, Props>(function GlobeView({
     const sx = canvas.width / rect.width, sy = canvas.height / rect.height;
     const mx = (ex - rect.left) * sx, my = (ey - rect.top) * sy;
     const cx = canvas.width / 2, cy = canvas.height / 2;
-    const radius = Math.min(canvas.width, canvas.height) * 0.42;
+    const radius = Math.min(canvas.width, canvas.height) * 0.42 * zoomRef.current;
     let best: GlobeCam | null = null, bestDist = HOVER_RADIUS * 3;
     for (const cam of cams) {
       if (!isOnVisibleHemisphere(cam.lon, cam.lat, rotRef.current)) continue;
@@ -390,14 +409,43 @@ const GlobeView = forwardRef<GlobeViewHandle, Props>(function GlobeView({
     setSpinning(false);
   }, [getCamAt]);
 
+  const onWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    changeZoom(e.deltaY < 0 ? 1.12 : 1 / 1.12);
+  }, [changeZoom]);
+
   const handleDrawerExpand    = useCallback((entry: CamLightboxEntry) => { setLightboxEntry(entry); }, []);
   const handleDrawerViewInMap = useCallback((cam: GlobeCam) => {
     setDrawerCam(null);
     if (onCamClick) onCamClick(cam); else onEnterMap();
   }, [onCamClick, onEnterMap]);
 
-  const onTouchStart = useCallback((e: React.TouchEvent) => { pauseRef.current = true; const t = e.touches[0]; gestureMovedRef.current = false; gestureStartRef.current = { x: t.clientX, y: t.clientY }; lastTouchRef.current = { x: t.clientX, y: t.clientY }; }, []);
+  const onTouchStart = useCallback((e: React.TouchEvent) => {
+    pauseRef.current = true;
+    if (e.touches.length >= 2) {
+      const [first, second] = Array.from(e.touches);
+      pinchDistanceRef.current = Math.hypot(first.clientX - second.clientX, first.clientY - second.clientY);
+      gestureMovedRef.current = true;
+      lastTouchRef.current = null;
+      return;
+    }
+    const touch = e.touches[0];
+    gestureMovedRef.current = false;
+    gestureStartRef.current = { x: touch.clientX, y: touch.clientY };
+    lastTouchRef.current = { x: touch.clientX, y: touch.clientY };
+  }, []);
   const onTouchMove  = useCallback((e: React.TouchEvent) => {
+    if (e.touches.length >= 2) {
+      const [first, second] = Array.from(e.touches);
+      const distance = Math.hypot(first.clientX - second.clientX, first.clientY - second.clientY);
+      const previousDistance = pinchDistanceRef.current;
+      if (previousDistance && Math.abs(distance - previousDistance) > 1) {
+        changeZoom(distance / previousDistance);
+        gestureMovedRef.current = true;
+      }
+      pinchDistanceRef.current = distance;
+      return;
+    }
     const t = e.touches[0]; const prev = lastTouchRef.current; if (!prev) return;
     const start = gestureStartRef.current;
     if (start && Math.hypot(t.clientX - start.x, t.clientY - start.y) > 5) gestureMovedRef.current = true;
@@ -406,8 +454,17 @@ const GlobeView = forwardRef<GlobeViewHandle, Props>(function GlobeView({
       Math.max(-60, Math.min(60, rotRef.current[1] - (t.clientY - prev.y) * 0.5)), 0,
     ];
     lastTouchRef.current = { x: t.clientX, y: t.clientY };
+  }, [changeZoom]);
+  const onTouchEnd = useCallback((e: React.TouchEvent) => {
+    pinchDistanceRef.current = null;
+    if (e.touches.length === 1) {
+      const touch = e.touches[0];
+      lastTouchRef.current = { x: touch.clientX, y: touch.clientY };
+      return;
+    }
+    pauseRef.current = false;
+    lastTouchRef.current = null;
   }, []);
-  const onTouchEnd = useCallback(() => { pauseRef.current = false; lastTouchRef.current = null; }, []);
 
   // React to countryFilter prop — pan globe to selected country
   useEffect(() => {
@@ -431,9 +488,15 @@ const GlobeView = forwardRef<GlobeViewHandle, Props>(function GlobeView({
         role="img"
         style={{ display: 'block', width: '100%', height: '100%', cursor: 'grab', touchAction: 'none' }}
         onMouseMove={onMouseMove} onMouseDown={onMouseDown} onMouseUp={onMouseUp}
-        onMouseLeave={onMouseLeave} onClick={onClick}
+        onMouseLeave={onMouseLeave} onClick={onClick} onWheel={onWheel}
         onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
       />
+
+      <div className="globe-zoom-controls" role="group" aria-label="Globe zoom controls">
+        <button type="button" aria-label="Zoom globe in" disabled={zoom >= MAX_GLOBE_ZOOM} onClick={() => changeZoom(1.25)}>+</button>
+        <output aria-label="Globe zoom level">{Math.round(zoom * 100)}%</output>
+        <button type="button" aria-label="Zoom globe out" disabled={zoom <= MIN_GLOBE_ZOOM} onClick={() => changeZoom(0.8)}>−</button>
+      </div>
 
       <button className="globe-spin-toggle" aria-pressed={!spinning} onClick={() => setSpinning(value => !value)}>
         {spinning ? 'Ⅱ Pause rotation' : '▷ Resume rotation'}

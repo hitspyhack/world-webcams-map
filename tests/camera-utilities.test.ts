@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cameraKey, hasCoordinates, readSavedCameras } from '../lib/cameras';
+import { cameraContextUrls, cameraKey, distanceKm, exportCameras, hasCoordinates, readCameraCollections, readSavedCameras, timestampedCaptureFilename } from '../lib/cameras';
 import { isOnVisibleHemisphere } from '../lib/globe';
 import { validBbox, viewportBbox } from '../lib/viewport';
 import { createCameraIcon } from '../lib/mapIcons';
@@ -43,6 +43,34 @@ describe('saved camera persistence', () => {
     expect(saved.imageUrl).toBeUndefined();
     expect(saved.linkUrl).toBe('https://example.com');
     expect(saved.color).toBe('#79c0ff');
+  });
+  it('keeps a valid named collection and capture timestamp', () => {
+    const [saved] = readSavedCameras(JSON.stringify([{ ...camera, collection: 'Coast', captureAt: '2026-10-17T10:00:00Z' }]));
+    expect(saved).toMatchObject({ collection: 'Coast', captureAt: '2026-10-17T10:00:00Z' });
+  });
+  it('reads collection names safely and always retains Favorites', () => {
+    expect(readCameraCollections(JSON.stringify(['Coast', 'Coast', '', 'Favorites']))).toEqual(['Favorites', 'Coast']);
+    expect(readCameraCollections('{bad json')).toEqual(['Favorites']);
+  });
+});
+
+describe('geographic search and exports', () => {
+  it('measures distance in kilometers and creates public map context links', () => {
+    expect(distanceKm(0, 0, 0, 1)).toBeCloseTo(111.2, 0);
+    expect(cameraContextUrls(0, 0).streetView).toContain('viewpoint=0%2C0');
+  });
+  it('creates a sanitized timestamped image filename', () => {
+    expect(timestampedCaptureFilename({ ...camera, title: 'São Paulo / view' }, new Date('2026-10-17T10:00:00.000Z'), 'image/webp'))
+      .toBe('earthcam-sao-paulo-view-2026-10-17T10-00-00-000Z.webp');
+  });
+  it('exports source attribution and coordinates as GeoJSON and CSV', () => {
+    const sample = { ...camera, linkUrl: 'https://provider.example/cam', captureAt: '2026-10-17T10:00:00Z' };
+    const geojson = JSON.parse(exportCameras([sample], 'geojson', '2026-10-17T11:00:00Z'));
+    expect(geojson.features[0]).toMatchObject({
+      geometry: { coordinates: [-9.1, 38.7] },
+      properties: { source: 'earthcam', sourceUrl: sample.linkUrl, capturedAt: sample.captureAt },
+    });
+    expect(exportCameras([sample], 'csv')).toContain('Source: earthcam (https://provider.example/cam)');
   });
 });
 

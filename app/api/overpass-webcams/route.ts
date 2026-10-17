@@ -9,15 +9,19 @@ const MIRRORS = [
   'https://overpass.openstreetmap.ru/api/interpreter',
 ];
 
-// 6 regional bounding boxes covering the inhabited world.
+// Regional bounding boxes cover inhabited areas while keeping each query small.
 // Running them in parallel keeps each query small and fast.
 const REGIONS: Array<{ name: string; bbox: string }> = [
   { name: 'Europe',       bbox: '35,-10,70,40'    },
+  { name: 'N. Atlantic',  bbox: '60,-25,85,60'    },
   { name: 'N. America',   bbox: '15,-170,75,-50'  },
   { name: 'S. America',   bbox: '-60,-85,15,-30'  },
   { name: 'Asia-E',       bbox: '-10,60,60,145'   },
+  { name: 'Central Asia', bbox: '5,35,60,100'     },
+  { name: 'N. Pacific',   bbox: '-10,145,60,180'  },
   { name: 'Africa+ME',    bbox: '-40,-20,40,60'   },
   { name: 'Oceania',      bbox: '-50,110,0,180'   },
+  { name: 'S. Oceania',   bbox: '-60,110,-50,180' },
 ];
 
 function buildQuery(bbox: string): string {

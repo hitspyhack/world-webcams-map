@@ -8,7 +8,7 @@ import { ASIA_SOURCES, EU_COUNTRIES } from '../lib/sources';
 import CountrySearch from './CountrySearch';
 import CameraExplorer from './CameraExplorer';
 import CamLightbox, { type CamLightboxEntry } from './CamLightbox';
-import { useWebcamFeeds } from '../hooks/useWebcamFeeds';
+import { useWebcamFeeds, type FeedKey } from '../hooks/useWebcamFeeds';
 import { hasCoordinates } from '../lib/cameras';
 import type { CountryEntry } from './CountrySearch';
 import type {
@@ -59,6 +59,7 @@ export interface FlyToTarget { lat: number; lon: number; zoom?: number; }
 interface TrafficCam {
   id: string; title?: string; lat: number; lon: number;
   country?: string; sourceCountry?: string; city?: string;
+  photoTime?: string;
 }
 interface AsiaCam {
   id: string; title: string; lat: number; lon: number;
@@ -204,6 +205,9 @@ function windyToGlobeCam(c: WindyWebcam): GlobeCam {
   return {
     lat, lon,
     title: c.title ?? 'Windy',
+    city: c.location?.city,
+    country: c.location?.country,
+    categories: c.categories?.map(category => category.name),
     color: SOURCE_COLORS.windy,
     source: 'windy',
     embedUrl,
@@ -313,6 +317,7 @@ export default function MapClient() {
           cams.push({
             lat: c.lat, lon: c.lon,
             title: c.title ?? 'Skyline',
+            city: c.city, country: c.country,
             color: SOURCE_COLORS.skyline, source: 'skyline',
             imageUrl: c.snapshotUrl,
             embedUrl: c.snapshotUrl ? undefined : c.url,
@@ -324,6 +329,7 @@ export default function MapClient() {
           cams.push({
             lat: c.lat, lon: c.lon,
             title: c.title ?? 'EarthCam',
+            city: c.city, country: c.country,
             color: SOURCE_COLORS.earthcam, source: 'earthcam',
             embedUrl: c.embedUrl,
             imageUrl: c.imageUrl,
@@ -335,6 +341,7 @@ export default function MapClient() {
           cams.push({
             lat: c.lat, lon: c.lon,
             title: c.title ?? 'OSM',
+            city: c.city, country: c.country,
             color: SOURCE_COLORS.osm, source: 'osm',
             embedUrl: c.thumbnailUrl ? undefined : c.webcamUrl,
             imageUrl: c.thumbnailUrl,
@@ -346,6 +353,7 @@ export default function MapClient() {
           cams.push({
             lat: c.lat, lon: c.lon,
             title: c.title ?? 'Deckchair',
+            city: c.city, country: c.country,
             color: SOURCE_COLORS.deckchair, source: 'deckchair',
             embedUrl: c.embedUrl,
             imageUrl: c.thumbnailUrl,
@@ -357,6 +365,8 @@ export default function MapClient() {
       cams.push({
         lat: c.lat, lon: c.lon,
         title: c.title ?? 'EU Traffic',
+        city: c.city, country: c.country ?? c.sourceCountry,
+        captureAt: c.photoTime,
         color: EU_GLOBE_COLOR, source: 'eu',
         embedUrl: (c as unknown as Record<string,string>).imageUrl ? undefined : (c as unknown as Record<string,string>).sourceUrl,
         imageUrl: (c as unknown as Record<string,string>).imageUrl,
@@ -369,14 +379,24 @@ export default function MapClient() {
       cams.push({
         lat: c.lat, lon: c.lon,
         title: c.title ?? 'Asia cam',
+        city: c.city, country: c.country ?? c.sourceCountry,
         color: ASIA_GLOBE_COLOR, source: 'asia',
         embedUrl: (c as unknown as Record<string,string>).imageUrl ? undefined : (c as unknown as Record<string,string>).sourceUrl,
         imageUrl: (c as unknown as Record<string,string>).imageUrl,
         linkUrl: (c as unknown as Record<string,string>).sourceUrl,
       });
     }
-    return cams;
-  }, [windyGlobeCams, filteredSkyline, filteredEarth, filteredOsm, filteredDeck, filteredEu, filteredAsia, visible, euVisible, asiaVisible, countryFilter, matchCountry]);
+    return cams.map(camera => {
+      const checkedAt = camera.source === 'asia'
+        ? Math.max(feeds.singapore.updatedAt ?? 0, feeds.tourism.updatedAt ?? 0) || undefined
+        : camera.source === 'eu'
+          ? feeds.eu.updatedAt
+          : camera.source && camera.source in feeds
+            ? feeds[camera.source as FeedKey].updatedAt
+            : undefined;
+      return { ...camera, checkedAt };
+    });
+  }, [windyGlobeCams, filteredSkyline, filteredEarth, filteredOsm, filteredDeck, filteredEu, filteredAsia, visible, euVisible, asiaVisible, countryFilter, matchCountry, feeds]);
 
   const handleGlobeCamClick = useCallback((cam: GlobeCam) => {
     setCountryFilter(null);
@@ -386,7 +406,7 @@ export default function MapClient() {
 
   const openExplorerCamera = useCallback((camera: GlobeCam) => {
     globeRef.current?.rotateTo(camera.lon, camera.lat);
-    setExplorerCamera({ source: camera.source ?? 'webcam', title: camera.title, imageUrl: camera.imageUrl, embedUrl: camera.embedUrl, linkUrl: camera.linkUrl });
+    setExplorerCamera({ source: camera.source ?? 'webcam', title: camera.title, imageUrl: camera.imageUrl, embedUrl: camera.embedUrl, linkUrl: camera.linkUrl, captureAt: camera.captureAt });
   }, []);
   const grandTotal = globeCams.length;
 
@@ -464,22 +484,9 @@ export default function MapClient() {
 
       {/* Mode toggle */}
       <button
+        className="mode-toggle"
         onClick={() => setMode(m => m === 'globe' ? 'map' : 'globe')}
         title={mode === 'globe' ? 'Switch to flat map' : 'Switch to globe'}
-        style={{
-          position: 'fixed', top: 14, left: 14, zIndex: 3000,
-          padding: '7px 14px',
-          background: 'rgba(4,14,10,0.88)',
-          border: '1px solid rgba(0,200,90,0.45)',
-          borderRadius: 7,
-          color: 'rgba(0,220,100,0.95)',
-          fontFamily: 'monospace', fontSize: 12, letterSpacing: '0.1em',
-          cursor: 'pointer',
-          boxShadow: '0 2px 12px rgba(0,0,0,0.5)',
-          transition: 'background 0.15s',
-        }}
-        onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,40,25,0.95)')}
-        onMouseLeave={e => (e.currentTarget.style.background = 'rgba(4,14,10,0.88)')}
       >
         {mode === 'globe' ? '🗺 MAP' : '🌐 GLOBE'}
       </button>

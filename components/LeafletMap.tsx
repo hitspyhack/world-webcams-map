@@ -392,6 +392,8 @@ function MapInner({
 
 // ── Public export (wraps MapContainer) ───────────────────────────────────────
 export default function LeafletMap(props: LeafletMapProps) {
+  const [baseLayer, setBaseLayer] = useState<'satellite' | 'dark'>('satellite');
+
   return (
     <MapContainer
       center={[20, 0]}
@@ -402,11 +404,34 @@ export default function LeafletMap(props: LeafletMapProps) {
       worldCopyJump
     >
       <TileLayer
-        url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-        subdomains="abcd"
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-        maxZoom={20}
+        key={baseLayer}
+        url={baseLayer === 'satellite'
+          ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+          : 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'}
+        {...(baseLayer === 'dark' ? { subdomains: 'abcd' } : {})}
+        attribution={baseLayer === 'satellite'
+          ? 'Tiles &copy; Esri - Sources: Esri, Maxar, Earthstar Geographics, and the GIS User Community'
+          : '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'}
+        maxZoom={18}
       />
+      <div role="group" aria-label="Map imagery" style={{
+        position: 'absolute', right: 14, bottom: 30, zIndex: 1000,
+        display: 'flex', padding: 3, gap: 3, borderRadius: 7,
+        background: 'rgba(13,17,23,0.94)', border: '1px solid #52616c',
+        boxShadow: '0 2px 12px #0008',
+      }}>
+        {(['satellite', 'dark'] as const).map(layer => (
+          <button key={layer} type="button" aria-pressed={baseLayer === layer}
+            onClick={() => setBaseLayer(layer)}
+            style={{
+              border: 0, borderRadius: 4, padding: '7px 10px', cursor: 'pointer',
+              background: baseLayer === layer ? '#315449' : 'transparent',
+              color: baseLayer === layer ? '#d8fff0' : '#d0d9df',
+              font: '600 11px system-ui, sans-serif',
+            }}
+          >{layer === 'satellite' ? 'Satellite' : 'Dark'}</button>
+        ))}
+      </div>
       <MapInner {...props} />
     </MapContainer>
   );

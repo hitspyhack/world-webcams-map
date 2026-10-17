@@ -5,15 +5,26 @@ Built with **Next.js 15, React, React-Leaflet, D3 Geo, and TopoJSON**.
 
 ## Explore your next view
 
-- **Globe & map:** drag to rotate, pause/resume rotation, or switch to the map.
+- **Globe & map:** drag to rotate, use wheel/pinch or on-screen controls to
+  zoom, click camera markers for details, pause/resume rotation, or switch to
+  the map.
   Globe code and low-resolution country boundaries are bundled locally—no
-  third-party script CDN is required. Source-colored map pins are self-contained
-  SVGs, too. CARTO map tiles still need internet access.
-- **Camera explorer:** search place names or sources, try **Surprise me**, and
-  locate a camera on the map. Discovery respects country and source filters.
+  third-party script CDN is required. The map opens on satellite imagery with
+  no API key and retains a dark CARTO basemap option. Both basemaps need
+  internet access.
+- **Camera explorer:** search places, countries, sources, Windy categories, or
+  cameras within a coordinate radius. Open map and Street View context, try
+  **Surprise me**, and export matching results as source-attributed CSV or
+  GeoJSON. Discovery respects country and source filters.
 - **Saved views:** star cameras to keep them in your browser. The Saved tab is
-  independent of discovery filters. Favorites stay on your device; no account
-  is required. If storage is blocked, they last for the current session only.
+  independent of discovery filters. Organize them into browser-local named
+  collections. Favorites stay on your device; no account is required. If
+  storage is blocked, they last for the current session only.
+- **Media and freshness:** distinguish a player link from a snapshot or source
+  link. Listing-check age is separate from provider capture time; capture times
+  are shown only when a provider supplies them. Direct snapshot downloads use a
+  local timestamped filename and work only when the provider permits browser
+  CORS access.
 - **Source health:** see which sources loaded, timed out, need configuration,
   or returned partial results. Refresh one provider or all providers. Previously
   loaded results remain available if a refresh fails.
@@ -61,7 +72,8 @@ invoke local provider handlers directly rather than making HTTP requests back to
 the incoming host. Partial failures are identified in the
 `X-Webcam-Failed-Countries` response header; complete failures return an error.
 The legacy community route excludes mapped surveillance locations without a
-public webcam link.
+public webcam link. Its OSM discovery covers additional worldwide regions but
+remains limited to intentionally webcam-tagged public entries.
 
 ## Reliability
 
@@ -73,6 +85,13 @@ public webcam link.
   normalized; dateline-crossing viewports use the full longitude range because
   the upstream bounding box cannot span the dateline.
 - A missing Windy key is a configuration state, not an error.
+- Windy remains capped at 50 results per request; its provider categories and
+  current preview/player links are preserved without extra API calls.
+- Camera images are loaded from their providers. The app does not capture,
+  archive, proxy, or rehost snapshots. An optional browser download uses the
+  provider's public image URL directly and is subject to its CORS policy; source
+  capture times are metadata, not a claim that an image is current or that
+  downloading it is permitted.
 - Globe markers on the hidden hemisphere are neither drawn nor clickable.
   Automatic rotation respects reduced-motion preferences and stops on selection.
 
@@ -122,4 +141,5 @@ Next ESLint config downgrade). Recheck when a compatible patch is available.
   [Windy](https://www.windy.com), EarthCam, tourism sites, and traffic authorities.
 - Map tiles and community data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright).
 - Dark map basemap © [CARTO](https://carto.com/attributions).
+- Satellite imagery tiles © Esri, Maxar, Earthstar Geographics, and the GIS User Community.
 - Globe boundaries: [world-atlas / Natural Earth](https://github.com/topojson/world-atlas).

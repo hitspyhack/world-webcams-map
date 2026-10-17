@@ -10,6 +10,7 @@ export interface CamLightboxEntry {
   imageUrl?: string;   // full-size static image — Skyline snapshot, EU/Asia imageUrl
   linkUrl?: string;    // external link fallback
   linkLabel?: string;
+  captureAt?: string;
 }
 
 const SOURCE_COLORS: Record<string, string> = {
@@ -108,6 +109,7 @@ export default function CamLightbox({ entry, onClose }: Props) {
             background: `${accentColor}18`, border: `1px solid ${accentColor}40`,
             borderRadius: 4, padding: '2px 6px', flexShrink: 0,
           }}>{sourceLabel}</span>
+          {(entry.embedUrl || entry.imageUrl) && <span style={{ fontSize: 9, fontWeight: 700, color: '#9fb0ba', flexShrink: 0 }}>{entry.embedUrl ? 'PLAYER LINK' : 'SNAPSHOT'}</span>}
           <span style={{
             flex: 1, fontSize: 14, fontWeight: 600,
             color: '#e6edf3', fontFamily: 'system-ui',
@@ -163,7 +165,7 @@ export default function CamLightbox({ entry, onClose }: Props) {
         </div>
 
         {/* Footer */}
-        {(entry.linkUrl || (entry.embedUrl && entry.imageUrl)) && (
+        {(entry.linkUrl || (entry.embedUrl && entry.imageUrl) || entry.captureAt) && (
           <div style={{
             padding: '8px 16px',
             borderTop: '1px solid #21262d',
@@ -172,6 +174,7 @@ export default function CamLightbox({ entry, onClose }: Props) {
             flexShrink: 0, gap: 12, flexWrap: 'wrap',
           }}>
             {hasEmbed && <span style={{ flex: 1, fontSize: 11, color: '#8b949e' }}>Feed not playing? The provider may require opening its website.</span>}
+            {entry.captureAt && Number.isFinite(Date.parse(entry.captureAt)) && <span style={{ flex: 1, fontSize: 10, color: '#8b949e' }}>Provider capture: {new Date(entry.captureAt).toLocaleString()}</span>}
             {entry.embedUrl && entry.imageUrl && (
               <button type="button" className="explorer-secondary" onClick={() => setSnapshotEntry(hasEmbed ? entry : null)}>
                 {hasEmbed ? 'Show snapshot' : 'Show player'}

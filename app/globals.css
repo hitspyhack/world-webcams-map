@@ -94,7 +94,19 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .explorer-tabs button { flex: 1; padding: 7px 4px; background: transparent; border: 0; border-radius: 5px; font-size: 12px; }
 .explorer-tabs button[aria-pressed="true"] { background: #263e4b; color: #bcf5dd; }
 .explorer-search input { width: 100%; background: #080f16; color: #e6edf3; border: 1px solid #334451; padding: 10px 12px; border-radius: 8px; font: inherit; }
+.explorer-collection-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); gap: 8px; margin-top: 9px; }
+.explorer-collection-controls label { display: grid; gap: 3px; color: #a2b7c7; font-size: 10px; }
+.explorer-collection-controls select, .explorer-new-collection input { min-width: 0; width: 100%; padding: 7px 8px; border: 1px solid #334451; border-radius: 6px; background: #080f16; color: #e6edf3; font: 12px system-ui, sans-serif; }
+.explorer-new-collection { display: flex; align-items: flex-end; gap: 5px; }
+.explorer-new-collection .explorer-secondary { padding: 6px 8px; }
+.explorer-geo-search { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin: 10px 0 0; padding: 8px; border: 1px solid #283641; border-radius: 6px; }
+.explorer-geo-search legend { padding: 0 4px; color: #a2b7c7; font-size: 10px; }
+.explorer-geo-search label { display: grid; gap: 3px; min-width: 0; color: #a2b7c7; font-size: 9px; }
+.explorer-geo-search input { min-width: 0; width: 100%; padding: 6px 5px; border: 1px solid #334451; border-radius: 5px; background: #080f16; color: #e6edf3; font: 11px system-ui, sans-serif; }
+.explorer-geo-search small { grid-column: 1 / -1; color: #ffac9f; font-size: 10px; }
 .explorer-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 0; font-size: 11px; color: #a2b7c7; }
+.explorer-actions { display: flex; align-items: center; gap: 4px; }
+.explorer-actions .explorer-secondary { padding: 5px 6px; font-size: 10px; white-space: nowrap; }
 .explorer-secondary { background: #203b35; border: 1px solid #416056; border-radius: 6px; padding: 5px 8px; color: #bcf5dd !important; }
 .explorer-hint { font-size: 11px; color: #a2b7c7; margin: 0 0 10px; }
 .explorer-results { list-style: none; margin: 0; padding: 0; }
@@ -102,10 +114,15 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .explorer-camera-title { display: flex; align-items: center; gap: 8px; }
 .explorer-open { flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 3px 0; font-weight: 600 !important; }
 .explorer-open:hover { color: #90eac4; }
+.camera-media-indicator { flex-shrink: 0; padding: 2px 4px; border: 1px solid #42515a; border-radius: 3px; color: #bfdbd1; font: 8px/1.2 monospace; }
 .explorer-icon { background: transparent; border: 1px solid #334451; border-radius: 6px; min-width: 32px; min-height: 32px; flex-shrink: 0; }
 .explorer-icon[aria-pressed="true"] { color: #f5ce79; }
-.explorer-camera-meta { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 10px; color: #a2b7c7; margin-top: 4px; }
-.explorer-camera-meta button { background: none; border: 0; color: #8ec7ef; padding: 4px; }
+.explorer-camera-meta { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; font-size: 10px; color: #a2b7c7; margin-top: 4px; }
+.explorer-camera-meta > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.explorer-camera-links { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; flex-shrink: 0; }
+.explorer-camera-meta button, .explorer-camera-meta a { background: none; border: 0; color: #8ec7ef; padding: 3px 2px; font: inherit; text-decoration: none; white-space: nowrap; }
+.explorer-freshness { display: flex; flex-wrap: wrap; gap: 3px 10px; margin-top: 4px; color: #78909c; font-size: 9px; }
+.explorer-freshness .is-stale { color: #f0b16f; }
 .explorer-empty { text-align: center; color: #a2b7c7; padding: 20px 8px; }
 .explorer-source { padding: 12px 0; border-bottom: 1px solid #283641; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .explorer-source strong { display: block; font-size: 12px; }
@@ -115,9 +132,33 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 @media (max-width: 600px) {
   .camera-explorer { bottom: 32px; width: min(350px, calc(100vw - 28px)); }
   .camera-explorer:has(.explorer-panel) { width: calc(100vw - 28px); }
+  .explorer-toolbar { align-items: flex-start; flex-direction: column; }
+  .explorer-actions { width: 100%; }
 }
 .globe-spin-toggle {
   position: absolute; bottom: 88px; left: 14px; z-index: 10;
   border: 1px solid #334451; border-radius: 7px; background: #0d141ce6;
   color: #a2b7c7; padding: 7px 10px; font: 11px system-ui; cursor: pointer;
 }
+.globe-zoom-controls {
+  position: absolute; top: 50%; right: 14px; z-index: 10;
+  display: grid; justify-items: center; gap: 3px; padding: 4px;
+  transform: translateY(-50%); border: 1px solid #334451; border-radius: 7px;
+  background: #0d141ce6; color: #c7d4dc; font: 10px monospace;
+}
+.globe-zoom-controls button {
+  width: 34px; height: 34px; border: 0; border-radius: 4px;
+  background: transparent; color: #d7e5eb; font: 22px/1 system-ui; cursor: pointer;
+}
+.globe-zoom-controls button:hover:not(:disabled) { background: #203b35; }
+.globe-zoom-controls button:disabled { opacity: 0.35; cursor: not-allowed; }
+.globe-zoom-controls output { padding: 2px 0; }
+.mode-toggle {
+  position: fixed; top: 14px; left: 14px; z-index: 3000;
+  padding: 7px 14px; background: rgba(4,14,10,0.88);
+  border: 1px solid rgba(0,200,90,0.45); border-radius: 7px;
+  color: rgba(0,220,100,0.95); font: 12px monospace; letter-spacing: 0.1em;
+  cursor: pointer; box-shadow: 0 2px 12px rgba(0,0,0,0.5);
+  transition: background 0.15s;
+}
+.mode-toggle:hover { background: rgba(0,40,25,0.95); }
