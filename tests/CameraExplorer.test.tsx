@@ -54,7 +54,7 @@ describe('camera explorer', () => {
     const { user } = setup([snapshotCamera]);
     await user.click(screen.getByRole('button', { name: /Explore cameras/ }));
     await user.click(screen.getByRole('button', { name: 'Download timestamped snapshot of São Paulo skyline' }));
-    expect(fetchMock).toHaveBeenCalledWith('https://camera.example/snapshot.jpg', { mode: 'cors', credentials: 'omit' });
+    expect(fetchMock).toHaveBeenCalledWith('https://camera.example/snapshot.jpg', expect.objectContaining({ mode: 'cors', credentials: 'omit', cache: 'no-store' }));
     expect(await screen.findByText(/provider may block browser capture/)).toBeInTheDocument();
   });
   it('saves across remounts and allows removal', async () => {

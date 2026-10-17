@@ -28,6 +28,12 @@ export interface GlobeCam {
   captureAt?: string;
   checkedAt?: number;
   collection?: string;
+  id?: string;
+  continent?: string;
+  mediaKind?: 'live' | 'timelapse' | 'snapshot' | 'player' | 'provider' | 'directory';
+  videoUrl?: string;
+  positionPrecision?: 'regional' | 'approximate' | 'provider';
+  description?: string;
 }
 
 /** Methods exposed to the parent via ref */
@@ -70,11 +76,11 @@ const MAX_GLOBE_ZOOM = 3.5;
 const COUNTRIES = feature(world as unknown as Topology, world.objects.countries as GeometryCollection);
 
 const SOURCE_LABELS: Record<SourceKey, string> = {
-  windy: 'Windy', skyline: 'Community', earthcam: 'EarthCam', osm: 'OSM', deckchair: 'Deckchair',
+  global: 'Global operators', windy: 'Windy', skyline: 'Community', earthcam: 'EarthCam', osm: 'OSM', deckchair: 'Deckchair',
 };
 
 const SOURCE_BADGE_COLORS: Record<string, string> = {
-  windy: '#60a5fa', skyline: '#f87171', earthcam: '#fb923c',
+  global: '#2dd4bf', windy: '#60a5fa', skyline: '#f87171', earthcam: '#fb923c',
   osm: '#4ade80', deckchair: '#c084fc', eu: '#818cf8', asia: '#fbbf24',
 };
 
@@ -165,9 +171,9 @@ function CamDrawer({
         </div>
       )}
       <div style={{ display: 'flex', gap: 6, padding: '8px 10px' }}>
-        {(hasEmbed || hasImage) && (
+        {(hasEmbed || hasImage || cam.linkUrl) && (
           <button
-            onClick={() => onExpand({ source: (cam.source ?? 'osm') as CamLightboxEntry['source'], title: cam.title, embedUrl: cam.embedUrl, imageUrl: cam.imageUrl, linkUrl: cam.linkUrl })}
+            onClick={() => onExpand({ ...cam, source: cam.source ?? 'webcam' })}
             style={{ flex: 1, padding: '5px 0', background: 'rgba(0,200,90,0.10)', border: '1px solid rgba(0,200,90,0.3)', borderRadius: 6, color: '#6effb4', fontSize: 10, cursor: 'pointer', letterSpacing: '0.05em', transition: 'background 0.15s' }}
             onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,200,90,0.20)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'rgba(0,200,90,0.10)')}

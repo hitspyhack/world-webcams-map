@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { validBbox } from '../../../lib/viewport';
 import { hasCoordinates, isPublicWebUrl } from '../../../lib/cameras';
 
 // Four public mirrors — tried in order, first success wins.
@@ -12,6 +13,9 @@ const MIRRORS = [
 // Regional bounding boxes cover inhabited areas while keeping each query small.
 // Running them in parallel keeps each query small and fast.
 const REGIONS: Array<{ name: string; bbox: string }> = [
+  { name: 'Antarctica', bbox: '-90,-180,-60,180' },
+  { name: 'Alaska + W. Pacific', bbox: '45,-180,75,-130' },
+  { name: 'Caribbean + C. America', bbox: '5,-100,25,-55' },
   { name: 'Europe',       bbox: '35,-10,70,40'    },
   { name: 'N. Atlantic',  bbox: '60,-25,85,60'    },
   { name: 'N. America',   bbox: '15,-170,75,-50'  },
@@ -24,11 +28,11 @@ const REGIONS: Array<{ name: string; bbox: string }> = [
   { name: 'S. Oceania',   bbox: '-60,110,-50,180' },
 ];
 
-function buildQuery(bbox: string): string {
+function buildQuery(bbox: string, limit = 250): string {
   return (
     `[out:json][timeout:25][bbox:${bbox}];` +
-    `(node["contact:webcam"];node["webcam"];);` +
-    `out body 250;`
+    `(nwr["contact:webcam"];nwr["webcam"];);` +
+    `out body center ${limit};`
   );
 }
 
@@ -46,7 +50,8 @@ async function fetchRegion(query: string): Promise<OverpassElement[]> {
       });
       if (!res.ok) continue;
       const data = await res.json();
-      return Array.isArray(data?.elements) ? data.elements : [];
+      if (!Array.isArray(data?.elements)) continue;
+      return data.elements;
     } catch {
       // try next mirror
     }
@@ -54,11 +59,20 @@ async function fetchRegion(query: string): Promise<OverpassElement[]> {
   throw new Error('All Overpass mirrors are unavailable');
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const params = new URL(request.url).searchParams;
+  const bbox = params.get('bbox');
+  const limit = Number(params.get('limit') ?? '250');
+  if (bbox !== null && !validBbox(bbox)) return NextResponse.json({ error: 'Invalid bbox. Expected north,east,south,west.' }, { status: 400 });
+  if (!Number.isInteger(limit) || limit < 1 || limit > 500) return NextResponse.json({ error: 'Limit must be an integer between 1 and 500.' }, { status: 400 });
+  const regions = bbox ? (() => {
+    const [n, e, s, w] = bbox.split(',').map(Number);
+    return [{ name: 'Requested area', bbox: [s, w, n, e].join(',') }];
+  })() : REGIONS;
   try {
     // Fan out all regions in parallel
     const settled = await Promise.allSettled(
-      REGIONS.map(r => fetchRegion(buildQuery(r.bbox)))
+      regions.map(r => fetchRegion(buildQuery(r.bbox, limit)))
     );
 
     if (settled.every(result => result.status === 'rejected')) {
@@ -66,15 +80,17 @@ export async function GET() {
     }
 
     // Merge and deduplicate by OSM node id
-    const seen = new Set<number>();
+    const seen = new Set<string>();
     const webcams: NormWebcam[] = [];
 
     for (const result of settled) {
       if (result.status !== 'fulfilled') continue;
-      for (const el of result.value) {
+      for (const item of result.value) {
+        const el = { ...item, lat: item.lat ?? item.center?.lat, lon: item.lon ?? item.center?.lon };
         if (!hasCoordinates(el)) continue;
-        if (seen.has(el.id)) continue;
-        seen.add(el.id);
+        const key = `${el.type ?? 'node'}-${el.id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
 
         const webcamUrl =
           el.tags?.['contact:webcam'] ??
@@ -83,13 +99,15 @@ export async function GET() {
         if (!isPublicWebUrl(webcamUrl)) continue;
 
         webcams.push({
-          id:         `osm-${el.id}`,
+          id:         `osm-${key}`,
           title:      el.tags?.name ?? el.tags?.['name:en'] ?? 'OSM Webcam',
           lat:        el.lat,
           lon:        el.lon,
           country:    el.tags?.['addr:country'] ?? '',
           city:       el.tags?.['addr:city'] ?? el.tags?.['is_in:city'] ?? '',
           webcamUrl,
+          positionPrecision: 'approximate',
+          description: el.type === 'way' || el.type === 'relation' ? 'Location is the center of a mapped OSM feature, not a surveyed camera position.' : 'Community-mapped location; accuracy and live availability are not verified.',
           // If the URL looks like a direct image/stream, use it as preview too
           thumbnailUrl: looksLikeImage(webcamUrl) ? webcamUrl : '',
           operator:   el.tags?.operator ?? '',
@@ -97,7 +115,10 @@ export async function GET() {
       }
     }
 
-    return NextResponse.json(webcams, { status: 200 });
+    return NextResponse.json(webcams, { status: 200, headers: {
+      'X-Webcam-Discovery': 'Listed public URLs; live availability not verified',
+      ...(settled.some(result => result.status === 'rejected') ? { 'X-Webcam-Failed-Regions': regions.filter((_region, index) => settled[index].status === 'rejected').map(region => region.name).join(',') } : {}),
+    } });
   } catch (err: unknown) {
     return NextResponse.json(
       { error: 'Network error', message: err instanceof Error ? err.message : String(err) },
@@ -129,6 +150,8 @@ function looksLikeImage(url: string): boolean {
 }
 
 interface OverpassElement {
+  type?: string;
+  center?: { lat: number; lon: number };
   id: number;
   lat?: number;
   lon?: number;
@@ -136,6 +159,8 @@ interface OverpassElement {
 }
 
 interface NormWebcam {
+  positionPrecision: 'approximate';
+  description: string;
   id: string;
   title: string;
   lat: number;

@@ -162,3 +162,37 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   transition: background 0.15s;
 }
 .mode-toggle:hover { background: rgba(0,40,25,0.95); }
+
+/* Investigation workspace: factual metadata, media and geographic context. */
+[hidden] { display: none !important; }
+.coverage-summary { display: grid; gap: 4px; border: 1px solid #284b48; background: #102927; padding: 12px; border-radius: 8px; margin-bottom: 12px; }
+.coverage-summary strong { color: #99f6e4; }
+.coverage-summary span, .coverage-summary small { color: #a2b7c7; font-size: 11px; }
+.discovery-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+.discovery-filters label, .windy-catalog label { font-size: 11px; color: #a2b7c7; display: grid; gap: 4px; }
+.discovery-filters select, .windy-catalog select, .windy-catalog input { width: 100%; min-width: 0; background: #080f16; color: #e6edf3; padding: 8px; border: 1px solid #334451; border-radius: 6px; }
+.windy-catalog { display: grid; gap: 12px; }
+.windy-catalog h3 { margin: 0; color: #8ec7ef; font-size: 16px; }
+.windy-catalog a { color: #8ec7ef; font-size: 12px; }
+.camera-workspace { padding: 14px 16px; border-top: 1px solid #283641; background: #0b151d; font: 12px/1.6 system-ui, sans-serif; color: #a2b7c7; }
+.workspace-meta { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.workspace-actions, .snapshot-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.workspace-actions button, .snapshot-controls button { background: #203b35; border: 1px solid #416056; color: #bcf5dd; border-radius: 6px; padding: 7px 10px; cursor: pointer; font: 12px system-ui; }
+.workspace-actions button:disabled { opacity: .5; }
+.workspace-actions a { color: #8ec7ef; padding: 5px 2px; }
+.capture-status { overflow-wrap: anywhere; }
+.google-context-frame { border: 0; width: 100%; height: 320px; border-radius: 8px; background: #111827; }
+.snapshot-controls { width: 100%; padding: 10px; font: 11px system-ui; color: #a2b7c7; }
+.snapshot-controls label { display: flex; gap: 6px; align-items: center; }
+.snapshot-observation { color: #a2b7c7; font: 11px/1.5 system-ui; padding: 8px 12px; margin: 0; }
+.video-preview video { width: 100%; max-height: 55dvh; background: #04080f; }
+.video-preview p { color: #fca5a5; padding: 12px; font: 12px system-ui; }
+@media (max-width: 600px) { .camera-explorer:has(.explorer-panel[hidden]) { width: min(350px, calc(100vw - 28px)); } }
+@media (min-width: 800px) {
+  .camera-explorer { width: 420px; }
+  .explorer-panel { max-height: min(740px, calc(100dvh - 145px)); }
+}
+.explorer-camera-title { flex-wrap: wrap; }
+.explorer-open { flex-basis: 170px; }
+.camera-media-indicator { max-width: 100%; white-space: normal; }
+.explorer-geo-search > button { grid-column: 1 / -1; }

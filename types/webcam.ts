@@ -31,6 +31,9 @@ export interface WindyWebcam {
   id?: string;
   title?: string;
   location?: WindyLocation;
+  status?: string;
+  lastUpdatedOn?: string;
+  mediaKind?: 'live' | 'timelapse' | 'snapshot' | 'provider';
   image?: WindyImages;
   images?: WindyImages;
   urls?: WindyUrls;
@@ -89,6 +92,8 @@ export interface EarthCamItem {
 // ── OpenStreetMap / Overpass ──────────────────────────────────────────────────
 
 export interface OsmWebcam {
+  positionPrecision?: 'approximate';
+  description?: string;
   id: string;
   title: string;
   lat: number;

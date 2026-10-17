@@ -3,6 +3,16 @@
 Explore public webcam locations on a rotating globe or an interactive map.
 Built with **Next.js 15, React, React-Leaflet, D3 Geo, and TopoJSON**.
 
+## Public webcam OSINT workspace
+
+**New:** worldwide operator references across all seven continents, geographic
+public-camera discovery, paged Windy v3 queries, provider-reported live versus
+timelapse labels, HLS/video playback, refreshing snapshots, SHA-256 capture ZIPs,
+and Google satellite/Street View context.
+
+See **[OSINT workspace guide](docs/OSINT_WORKSPACE.md)** for configuration,
+provenance semantics, quotas, capture constraints, and known coverage limits.
+
 ## Explore your next view
 
 - **Globe & map:** drag to rotate, use wheel/pinch or on-screen controls to
@@ -21,10 +31,10 @@ Built with **Next.js 15, React, React-Leaflet, D3 Geo, and TopoJSON**.
   collections. Favorites stay on your device; no account is required. If
   storage is blocked, they last for the current session only.
 - **Media and freshness:** distinguish a player link from a snapshot or source
-  link. Listing-check age is separate from provider capture time; capture times
-  are shown only when a provider supplies them. Direct snapshot downloads use a
-  local timestamped filename and work only when the provider permits browser
-  CORS access.
+  link. Catalog-retrieval age is separate from provider capture time; capture times
+  are shown only when a provider supplies them. Capture downloads a timestamped ZIP with original raster bytes and a
+  SHA-256 manifest, only when the provider permits browser CORS access and use
+  complies with provider terms.
 - **Source health:** see which sources loaded, timed out, need configuration,
   or returned partial results. Refresh one provider or all providers. Previously
   loaded results remain available if a refresh fails.
@@ -57,17 +67,19 @@ Never commit `.env.local` or real credentials.
 
 | Route | Method | Data | Key |
 |---|---|---|---|
-| `/api/windy-webcams` | GET | Windy API v3; accepts `bbox=north,east,south,west` and a positive integer `limit` (capped at 50) | Optional Windy key |
+| `/api/windy-webcams` | GET | Windy v3; validated bbox, limit, offset, countries and categories; bounded two-minute cache | Windy key |
+| `/api/global-webcams` | GET | Curated public operator references, with media and position provenance | None |
+| `/api/google-view` | GET | Optional satellite/Street View embed configuration for coordinates | Optional restricted browser key |
 | `/api/skyline-webcams` | POST | Legacy route name; now public OSM webcam links, **not** a Skyline/Apify scraper | None |
 | `/api/earthcam` | GET | Curated EarthCam locations | None |
-| `/api/overpass-webcams` | GET | OSM nodes with public webcam URLs; mirrored Overpass queries | None |
+| `/api/overpass-webcams` | GET | OSM nodes/ways/relations with public webcam URLs; optional bbox/limit discovery | None |
 | `/api/deckchair` | GET | Curated scenic webcam links; not a live Deckchair API | None |
 | `/api/eu-traffic` | GET | Country-provider aggregation; optional `countries=PT,FR,...` | None |
 | `/api/asia-tourism` | GET | Curated Asian tourism webcam links | None |
 | `/api/asia-traffic` | GET | Country-provider aggregation; optional `countries=SG,JP,KR,TW,TH` | None |
 
-The explorer loads Singapore traffic and Asian tourism separately. Other Asian
-traffic endpoints are available through the aggregate API. Traffic aggregators
+The explorer loads all five existing Asia traffic providers and Asian tourism
+separately. Availability varies by provider and deployment network. Traffic aggregators
 invoke local provider handlers directly rather than making HTTP requests back to
 the incoming host. Partial failures are identified in the
 `X-Webcam-Failed-Countries` response header; complete failures return an error.
@@ -87,9 +99,9 @@ remains limited to intentionally webcam-tagged public entries.
 - A missing Windy key is a configuration state, not an error.
 - Windy remains capped at 50 results per request; its provider categories and
   current preview/player links are preserved without extra API calls.
-- Camera images are loaded from their providers. The app does not capture,
-  archive, proxy, or rehost snapshots. An optional browser download uses the
-  provider's public image URL directly and is subject to its CORS policy; source
+- Camera images are loaded from their providers. The server does not archive,
+  proxy, or rehost snapshots. User-initiated browser captures use the
+  provider's public image URL directly and are subject to its CORS policy; source
   capture times are metadata, not a claim that an image is current or that
   downloading it is permitted.
 - Globe markers on the hidden hemisphere are neither drawn nor clickable.
@@ -126,7 +138,8 @@ containment is browser-provided; unit tests use a dialog shim.
 ## Deployment & limitations
 
 Deploy as a standard Next.js app on Vercel or another Node-compatible host.
-Set the optional Windy key in deployment environment settings. Provider feeds,
+Set the optional Windy key and, for Google embeds, a restricted Google browser
+key in deployment environment settings. External Google links need no key. Provider feeds,
 external images, and map tiles require internet access and may have regional,
 rate, or embedding restrictions. Saved views are browser-local, not cloud-synced.
 

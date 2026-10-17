@@ -10,6 +10,9 @@ import CameraExplorer from './CameraExplorer';
 import CamLightbox, { type CamLightboxEntry } from './CamLightbox';
 import { useWebcamFeeds, type FeedKey } from '../hooks/useWebcamFeeds';
 import { hasCoordinates } from '../lib/cameras';
+import { mergeWindyCameras } from '../lib/windy';
+import { videoUrl } from '../lib/media';
+import { continentFor } from '../lib/coverage';
 import type { CountryEntry } from './CountrySearch';
 import type {
   SkylineItem,
@@ -41,9 +44,10 @@ function Splash({ text }: { text: string }) {
   );
 }
 
-export type SourceKey = 'windy' | 'skyline' | 'earthcam' | 'osm' | 'deckchair';
+export type SourceKey = 'global' | 'windy' | 'skyline' | 'earthcam' | 'osm' | 'deckchair';
 
 export const SOURCE_COLORS: Record<SourceKey, string> = {
+  global: '#2dd4bf',
   windy:     '#60a5fa',
   skyline:   '#f87171',
   earthcam:  '#fb923c',
@@ -68,6 +72,7 @@ interface AsiaCam {
 
 // ─── Country centroids ────────────────────────────────────────────────────────
 const COUNTRY_CENTROIDS: Record<string, { name: string; lat: number; lon: number }> = {
+  AQ: {name:'Antarctica',lat:-75,lon:0},
   AD:{name:'Andorra',lat:42.55,lon:1.60},AE:{name:'United Arab Emirates',lat:23.42,lon:53.85},
   AF:{name:'Afghanistan',lat:33.93,lon:67.71},AG:{name:'Antigua and Barbuda',lat:17.06,lon:-61.80},
   AL:{name:'Albania',lat:41.15,lon:20.17},AM:{name:'Armenia',lat:40.07,lon:45.04},
@@ -200,11 +205,12 @@ function windyToGlobeCam(c: WindyWebcam): GlobeCam {
   const lat = c.location!.latitude;
   const lon = c.location!.longitude;
   const id = c.id ?? (c as unknown as Record<string,unknown>).webcamId;
-  const embedUrl = id ? `https://webcams.windy.com/webcams/${id}/player` : undefined;
+  const embedUrl = c.urls?.player;
   const imageUrl = c.image?.current?.preview ?? c.images?.current?.preview;
   return {
     lat, lon,
     title: c.title ?? 'Windy',
+    id: String(id), mediaKind: c.mediaKind, captureAt: c.lastUpdatedOn, positionPrecision: 'provider',
     city: c.location?.city,
     country: c.location?.country,
     categories: c.categories?.map(category => category.name),
@@ -223,7 +229,7 @@ export default function MapClient() {
   const globeRef = useRef<GlobeViewHandle>(null);
 
   const [visible, setVisible] = useState<Record<SourceKey, boolean>>(
-    { windy: true, skyline: true, earthcam: true, osm: true, deckchair: true }
+    { global: true, windy: true, skyline: true, earthcam: true, osm: true, deckchair: true }
   );
   const [euVisible, setEuVisible] = useState<Record<string, boolean>>(
     Object.fromEntries(Object.keys(EU_COUNTRIES).map(k => [k, true]))
@@ -233,13 +239,18 @@ export default function MapClient() {
   );
 
   const { feeds, refresh, loading } = useWebcamFeeds();
+  const [additionalOsm, setAdditionalOsm] = useState<OsmWebcam[]>([]);
+  const addOsmBatch = useCallback((cameras: OsmWebcam[]) => setAdditionalOsm(previous => [...new Map([...previous, ...cameras].map(camera => [camera.id, camera])).values()].slice(-5000)), []);
+  const [additionalWindy, setAdditionalWindy] = useState<WindyWebcam[]>([]);
+  const addWindyBatch = useCallback((cameras: WindyWebcam[]) => setAdditionalWindy(previous => mergeWindyCameras(previous, cameras)), []);
+  const globalCams = useMemo(() => feeds.global.data.filter(hasCoordinates) as GlobeCam[], [feeds.global.data]);
   const skylineCams = useMemo(() => feeds.skyline.data.filter(hasCoordinates) as SkylineItem[], [feeds.skyline.data]);
   const earthCams = useMemo(() => feeds.earthcam.data.filter(hasCoordinates) as EarthCamItem[], [feeds.earthcam.data]);
-  const osmCams = useMemo(() => feeds.osm.data.filter(hasCoordinates) as OsmWebcam[], [feeds.osm.data]);
+  const osmCams = useMemo(() => [...new Map(([...feeds.osm.data, ...additionalOsm].filter(hasCoordinates) as OsmWebcam[]).map(camera => [camera.id, camera])).values()], [feeds.osm.data, additionalOsm]);
   const deckCams = useMemo(() => feeds.deckchair.data.filter(hasCoordinates) as DeckchairWebcam[], [feeds.deckchair.data]);
   const euCams = useMemo(() => feeds.eu.data.filter(hasCoordinates) as TrafficCam[], [feeds.eu.data]);
   const asiaCams = useMemo(() => [...feeds.singapore.data, ...feeds.tourism.data].filter(hasCoordinates) as AsiaCam[], [feeds.singapore.data, feeds.tourism.data]);
-  const windyGlobeCams = useMemo(() => (feeds.windy.data as WindyWebcam[]).filter(camera => hasCoordinates({ lat: camera?.location?.latitude, lon: camera?.location?.longitude })), [feeds.windy.data]);
+  const windyGlobeCams = useMemo(() => mergeWindyCameras(feeds.windy.data as WindyWebcam[], additionalWindy).filter(camera => hasCoordinates({ lat: camera?.location?.latitude, lon: camera?.location?.longitude })), [feeds.windy.data, additionalWindy]);
   const errors = useMemo(() => Object.entries(feeds).flatMap(([key, feed]) => feed.status === 'error' ? [`${key}: ${feed.error}`] : []), [feeds]);
   const [explorerCamera, setExplorerCamera] = useState<CamLightboxEntry | null>(null);
 
@@ -260,6 +271,7 @@ export default function MapClient() {
       if (!counts[code]) counts[code] = { name: centroid.name, lat: centroid.lat, lon: centroid.lon, count: 0 };
       counts[code].count++;
     };
+    for (const c of globalCams) addCode(c.country);
     for (const c of skylineCams)    addCode(camCountry(c));
     for (const c of earthCams)      addCode(camCountry(c));
     for (const c of osmCams)        addCode(camCountry(c));
@@ -270,7 +282,7 @@ export default function MapClient() {
     return Object.entries(counts)
       .map(([code, v]) => ({ code, ...v }))
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-  }, [skylineCams, earthCams, osmCams, deckCams, euCams, asiaCams, windyGlobeCams]);
+  }, [globalCams, skylineCams, earthCams, osmCams, deckCams, euCams, asiaCams, windyGlobeCams]);
 
   const windyForceBbox = useMemo(() => {
     if (!countryFilter) return null;
@@ -297,6 +309,7 @@ export default function MapClient() {
       raw.toLowerCase() === countryFilter.name.toLowerCase();
   }, [countryFilter]);
 
+  const filteredGlobal = useMemo(() => countryFilter ? globalCams.filter(c => matchCountry(c.country)) : globalCams, [globalCams, countryFilter, matchCountry]);
   const filteredSkyline = useMemo(() => countryFilter ? skylineCams.filter(c => matchCountry(camCountry(c))) : skylineCams,  [skylineCams,  matchCountry, countryFilter]);
   const filteredEarth   = useMemo(() => countryFilter ? earthCams.filter(c => matchCountry(camCountry(c)))   : earthCams,    [earthCams,    matchCountry, countryFilter]);
   const filteredOsm     = useMemo(() => countryFilter ? osmCams.filter(c => matchCountry(camCountry(c)))     : osmCams,      [osmCams,      matchCountry, countryFilter]);
@@ -305,7 +318,7 @@ export default function MapClient() {
   const filteredAsia    = useMemo(() => countryFilter ? asiaCams.filter(c => matchCountry(camCountry(c)))    : asiaCams,     [asiaCams,     matchCountry, countryFilter]);
 
   const globeCams: GlobeCam[] = useMemo(() => {
-    const cams: GlobeCam[] = [];
+    const cams: GlobeCam[] = visible.global ? [...filteredGlobal] : [];
     if (visible.windy)
       for (const c of windyGlobeCams) {
         if (countryFilter && !matchCountry(c.location?.country ?? '')) continue;
@@ -341,9 +354,11 @@ export default function MapClient() {
           cams.push({
             lat: c.lat, lon: c.lon,
             title: c.title ?? 'OSM',
+            positionPrecision: c.positionPrecision ?? 'approximate', description: c.description,
             city: c.city, country: c.country,
             color: SOURCE_COLORS.osm, source: 'osm',
-            embedUrl: c.thumbnailUrl ? undefined : c.webcamUrl,
+            embedUrl: c.thumbnailUrl || videoUrl(c.webcamUrl) ? undefined : c.webcamUrl,
+            videoUrl: videoUrl(c.webcamUrl),
             imageUrl: c.thumbnailUrl,
             linkUrl: c.webcamUrl,
           });
@@ -394,9 +409,9 @@ export default function MapClient() {
           : camera.source && camera.source in feeds
             ? feeds[camera.source as FeedKey].updatedAt
             : undefined;
-      return { ...camera, checkedAt };
+      return { ...camera, continent: camera.continent ?? continentFor(camera.country), checkedAt };
     });
-  }, [windyGlobeCams, filteredSkyline, filteredEarth, filteredOsm, filteredDeck, filteredEu, filteredAsia, visible, euVisible, asiaVisible, countryFilter, matchCountry, feeds]);
+  }, [filteredGlobal, windyGlobeCams, filteredSkyline, filteredEarth, filteredOsm, filteredDeck, filteredEu, filteredAsia, visible, euVisible, asiaVisible, countryFilter, matchCountry, feeds]);
 
   const handleGlobeCamClick = useCallback((cam: GlobeCam) => {
     setCountryFilter(null);
@@ -406,9 +421,9 @@ export default function MapClient() {
 
   const openExplorerCamera = useCallback((camera: GlobeCam) => {
     globeRef.current?.rotateTo(camera.lon, camera.lat);
-    setExplorerCamera({ source: camera.source ?? 'webcam', title: camera.title, imageUrl: camera.imageUrl, embedUrl: camera.embedUrl, linkUrl: camera.linkUrl, captureAt: camera.captureAt });
+    setExplorerCamera({ ...camera, source: camera.source ?? 'webcam' });
   }, []);
-  const grandTotal = globeCams.length;
+  const grandTotal = globeCams.filter(camera => camera.mediaKind !== 'directory').length;
 
   return (
     <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden' }}>
@@ -454,6 +469,8 @@ export default function MapClient() {
         zIndex: mode === 'map' ? 2 : 1,
       }}>
         <LeafletMap
+          globalCams={filteredGlobal}
+          windyCatalog={additionalWindy}
           skylineCams={filteredSkyline}
           earthCams={filteredEarth}
           osmCams={filteredOsm}
@@ -479,7 +496,7 @@ export default function MapClient() {
         />
       </div>}
 
-      <CameraExplorer cameras={globeCams} feeds={feeds} onRefresh={refresh} onOpen={openExplorerCamera} onLocate={handleGlobeCamClick} />
+      <CameraExplorer onOsmBatch={addOsmBatch} onWindyBatch={addWindyBatch} cameras={globeCams} feeds={feeds} onRefresh={refresh} onOpen={openExplorerCamera} onLocate={handleGlobeCamClick} />
       <CamLightbox entry={explorerCamera} onClose={() => setExplorerCamera(null)} />
 
       {/* Mode toggle */}
