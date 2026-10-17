@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import L from 'leaflet';
+import type L from 'leaflet';
+import { createCameraIcon } from '../lib/mapIcons';
+import { hasCoordinates } from '../lib/cameras';
 import { Marker, Popup } from 'react-leaflet';
 import type { CamLightboxEntry } from './CamLightbox';
 
@@ -23,47 +25,28 @@ interface TrafficCam {
   operator?: string;
 }
 
-export const EU_COUNTRIES: Record<string, string> = {
-  FI: 'Finland',
-  EE: 'Estonia',
-  GB: 'UK (TfL)',
-  SE: 'Sweden',
-  NO: 'Norway',
-  PT: 'Portugal',
-  DE: 'Germany',
-  FR: 'France',
-  ES: 'Spain',
-  NL: 'Netherlands',
-  AT: 'Austria',
-  CH: 'Switzerland',
-  IT: 'Italy',
-  DK: 'Denmark',
-  BE: 'Belgium',
-  PL: 'Poland',
-  EU: 'OSM Roads',
-};
+import { EU_COUNTRIES } from '../lib/sources';
+export { EU_COUNTRIES } from '../lib/sources';
 
-const EU_CONFIG: Record<string, { label: string; flag: string; color: string; markerUrl: string }> = {
-  FI: { label: 'Finland',     flag: '\ud83c\uddeb\ud83c\uddee', color: '#06b6d4', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png' },
-  EE: { label: 'Estonia',     flag: '\ud83c\uddea\ud83c\uddea', color: '#f59e0b', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-gold.png' },
-  GB: { label: 'UK (TfL)',    flag: '\ud83c\uddec\ud83c\udde7', color: '#dc2626', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png' },
-  SE: { label: 'Sweden',      flag: '\ud83c\uddf8\ud83c\uddea', color: '#3b82f6', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png' },
-  NO: { label: 'Norway',      flag: '\ud83c\uddf3\ud83c\uddf4', color: '#16a34a', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png' },
-  PT: { label: 'Portugal',    flag: '\ud83c\uddf5\ud83c\uddf9', color: '#15803d', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png' },
-  DE: { label: 'Germany',     flag: '\ud83c\udde9\ud83c\uddea', color: '#facc15', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-gold.png' },
-  FR: { label: 'France',      flag: '\ud83c\uddeb\ud83c\uddf7', color: '#818cf8', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-violet.png' },
-  ES: { label: 'Spain',       flag: '\ud83c\uddea\ud83c\uddf8', color: '#f97316', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-orange.png' },
-  NL: { label: 'Netherlands', flag: '\ud83c\uddf3\ud83c\uddf1', color: '#f97316', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-orange.png' },
-  AT: { label: 'Austria',     flag: '\ud83c\udde6\ud83c\uddf9', color: '#ef4444', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png' },
-  CH: { label: 'Switzerland', flag: '\ud83c\udde8\ud83c\udded', color: '#f43f5e', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png' },
-  IT: { label: 'Italy',       flag: '\ud83c\uddee\ud83c\uddf9', color: '#34d399', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png' },
-  DK: { label: 'Denmark',     flag: '\ud83c\udde9\ud83c\uddf0', color: '#f87171', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png' },
-  BE: { label: 'Belgium',     flag: '\ud83c\udde7\ud83c\uddea', color: '#fbbf24', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-gold.png' },
-  PL: { label: 'Poland',      flag: '\ud83c\uddf5\ud83c\uddf1', color: '#e879f9', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-violet.png' },
-  EU: { label: 'OSM Roads',   flag: '\ud83c\uddea\ud83c\uddfa', color: '#7c3aed', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-violet.png' },
+const EU_CONFIG: Record<string, { label: string; flag: string; color: string }> = {
+  FI: { label: 'Finland',     flag: '\ud83c\uddeb\ud83c\uddee', color: '#06b6d4' },
+  EE: { label: 'Estonia',     flag: '\ud83c\uddea\ud83c\uddea', color: '#f59e0b' },
+  GB: { label: 'UK (TfL)',    flag: '\ud83c\uddec\ud83c\udde7', color: '#dc2626' },
+  SE: { label: 'Sweden',      flag: '\ud83c\uddf8\ud83c\uddea', color: '#3b82f6' },
+  NO: { label: 'Norway',      flag: '\ud83c\uddf3\ud83c\uddf4', color: '#16a34a' },
+  PT: { label: 'Portugal',    flag: '\ud83c\uddf5\ud83c\uddf9', color: '#15803d' },
+  DE: { label: 'Germany',     flag: '\ud83c\udde9\ud83c\uddea', color: '#facc15' },
+  FR: { label: 'France',      flag: '\ud83c\uddeb\ud83c\uddf7', color: '#818cf8' },
+  ES: { label: 'Spain',       flag: '\ud83c\uddea\ud83c\uddf8', color: '#f97316' },
+  NL: { label: 'Netherlands', flag: '\ud83c\uddf3\ud83c\uddf1', color: '#f97316' },
+  AT: { label: 'Austria',     flag: '\ud83c\udde6\ud83c\uddf9', color: '#ef4444' },
+  CH: { label: 'Switzerland', flag: '\ud83c\udde8\ud83c\udded', color: '#f43f5e' },
+  IT: { label: 'Italy',       flag: '\ud83c\uddee\ud83c\uddf9', color: '#34d399' },
+  DK: { label: 'Denmark',     flag: '\ud83c\udde9\ud83c\uddf0', color: '#f87171' },
+  BE: { label: 'Belgium',     flag: '\ud83c\udde7\ud83c\uddea', color: '#fbbf24' },
+  PL: { label: 'Poland',      flag: '\ud83c\uddf5\ud83c\uddf1', color: '#e879f9' },
+  EU: { label: 'OSM Roads',   flag: '\ud83c\uddea\ud83c\uddfa', color: '#7c3aed' },
 };
-
-const SHADOW = 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png';
 
 // Lazy-init: only called in the browser, never at module-eval time on the server.
 let _icons: Record<string, L.Icon> | null = null;
@@ -74,7 +57,7 @@ function getIcons(): Record<string, L.Icon> {
     _icons = Object.fromEntries(
       Object.entries(EU_CONFIG).map(([k, v]) => [
         k,
-        new L.Icon({ iconUrl: v.markerUrl, iconRetinaUrl: v.markerUrl.replace('.png', '-2x.png'), shadowUrl: SHADOW, iconSize: [20, 33], iconAnchor: [10, 33], popupAnchor: [1, -28], shadowSize: [33, 33] }),
+        createCameraIcon(v.color, true),
       ])
     );
   }
@@ -83,13 +66,13 @@ function getIcons(): Record<string, L.Icon> {
 
 function getDefaultIcon(): L.Icon {
   if (!_defaultIcon) {
-    _defaultIcon = new L.Icon({ iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png', iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png', shadowUrl: SHADOW, iconSize: [20, 33], iconAnchor: [10, 33], popupAnchor: [1, -28], shadowSize: [33, 33] });
+    _defaultIcon = createCameraIcon('#79c0ff', true);
   }
   return _defaultIcon;
 }
 
 function isPopulated(cam: TrafficCam): boolean {
-  if (!cam.lat || !cam.lon || !isFinite(cam.lat) || !isFinite(cam.lon)) return false;
+  if (!hasCoordinates(cam)) return false;
   const hasContent = !!(cam.title?.trim()) || !!(cam.imageUrl) || !!(cam.sourceUrl) || !!(cam.webcamUrl);
   if (!hasContent) return false;
   return !!(cam.imageUrl || cam.sourceUrl || cam.webcamUrl || cam.roadCondition);

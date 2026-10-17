@@ -59,3 +59,65 @@ body {
   background: #21262d !important;
   color: #fff !important;
 }
+
+/* Keep keyboard focus visible on dark controls. */
+button:focus-visible, a:focus-visible, input:focus-visible {
+  outline: 2px solid #79c0ff;
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+.camera-explorer {
+  position: fixed; bottom: 26px; left: 14px; z-index: 4000;
+  width: 350px; max-width: calc(100vw - 28px); color: #e6edf3;
+  background: rgba(13, 20, 28, .97); border: 1px solid #334451;
+  border-radius: 14px; box-shadow: 0 14px 45px #0007; overflow: hidden;
+  font: 13px/1.5 system-ui, sans-serif; backdrop-filter: blur(12px);
+}
+.camera-explorer button { font: inherit; cursor: pointer; color: inherit; }
+.camera-explorer button:disabled { opacity: .4; cursor: not-allowed; }
+.explorer-toggle { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 0; background: #17252e; padding: 13px 14px; text-align: left; }
+.explorer-toggle > span:first-child { color: #90eac4; font-weight: 650; }
+.explorer-count { font-size: 11px; color: #a2b7c7; }
+.explorer-panel { padding: 12px; max-height: min(560px, calc(100dvh - 145px)); overflow: auto; }
+.explorer-tabs { display: flex; gap: 4px; padding: 3px; background: #080f16; border-radius: 8px; margin-bottom: 12px; }
+.explorer-tabs button { flex: 1; padding: 7px 4px; background: transparent; border: 0; border-radius: 5px; font-size: 12px; }
+.explorer-tabs button[aria-pressed="true"] { background: #263e4b; color: #bcf5dd; }
+.explorer-search input { width: 100%; background: #080f16; color: #e6edf3; border: 1px solid #334451; padding: 10px 12px; border-radius: 8px; font: inherit; }
+.explorer-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 0; font-size: 11px; color: #a2b7c7; }
+.explorer-secondary { background: #203b35; border: 1px solid #416056; border-radius: 6px; padding: 5px 8px; color: #bcf5dd !important; }
+.explorer-hint { font-size: 11px; color: #a2b7c7; margin: 0 0 10px; }
+.explorer-results { list-style: none; margin: 0; padding: 0; }
+.explorer-results li { padding: 10px 0; border-top: 1px solid #283641; }
+.explorer-camera-title { display: flex; align-items: center; gap: 8px; }
+.explorer-open { flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 3px 0; font-weight: 600 !important; }
+.explorer-open:hover { color: #90eac4; }
+.explorer-icon { background: transparent; border: 1px solid #334451; border-radius: 6px; min-width: 32px; min-height: 32px; flex-shrink: 0; }
+.explorer-icon[aria-pressed="true"] { color: #f5ce79; }
+.explorer-camera-meta { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 10px; color: #a2b7c7; margin-top: 4px; }
+.explorer-camera-meta button { background: none; border: 0; color: #8ec7ef; padding: 4px; }
+.explorer-empty { text-align: center; color: #a2b7c7; padding: 20px 8px; }
+.explorer-source { padding: 12px 0; border-bottom: 1px solid #283641; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.explorer-source strong { display: block; font-size: 12px; }
+.feed-state, .explorer-source small { display: block; font-size: 11px; color: #a2b7c7; }
+.feed-error { color: #ffac9f; }
+.feed-ready { color: #90eac4; }
+@media (max-width: 600px) {
+  .camera-explorer { bottom: 32px; width: min(350px, calc(100vw - 28px)); }
+  .camera-explorer:has(.explorer-panel) { width: calc(100vw - 28px); }
+}
+.globe-spin-toggle {
+  position: absolute; bottom: 88px; left: 14px; z-index: 10;
+  border: 1px solid #334451; border-radius: 7px; background: #0d141ce6;
+  color: #a2b7c7; padding: 7px 10px; font: 11px system-ui; cursor: pointer;
+}

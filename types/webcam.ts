@@ -31,6 +31,7 @@ export interface WindyWebcam {
   id?: string;
   title?: string;
   location?: WindyLocation;
+  image?: WindyImages;
   images?: WindyImages;
   urls?: WindyUrls;
   categories?: Array<{ id: string; name: string }>;
@@ -94,6 +95,7 @@ export interface OsmWebcam {
   lon: number;
   country?: string;
   city?: string;
+  thumbnailUrl?: string;
   webcamUrl: string;
   operator?: string;
 }
@@ -101,6 +103,8 @@ export interface OsmWebcam {
 // ── Deckchair ────────────────────────────────────────────────────────────────
 
 export interface DeckchairWebcam {
+  country?: string;
+  city?: string;
   id: string;
   title: string;
   lat: number;

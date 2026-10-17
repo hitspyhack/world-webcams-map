@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { hasCoordinates, isPublicWebUrl } from '../../../lib/cameras';
 
 // Four public mirrors — tried in order, first success wins.
 const MIRRORS = [
@@ -33,6 +34,7 @@ async function fetchRegion(query: string): Promise<OverpassElement[]> {
     try {
       const res = await fetch(mirror, {
         method: 'POST',
+        signal: AbortSignal.timeout(7_000),
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body,
         // Next.js fetch cache — revalidate every hour (OSM data changes slowly)
@@ -45,7 +47,7 @@ async function fetchRegion(query: string): Promise<OverpassElement[]> {
       // try next mirror
     }
   }
-  return [];
+  throw new Error('All Overpass mirrors are unavailable');
 }
 
 export async function GET() {
@@ -55,6 +57,10 @@ export async function GET() {
       REGIONS.map(r => fetchRegion(buildQuery(r.bbox)))
     );
 
+    if (settled.every(result => result.status === 'rejected')) {
+      return NextResponse.json({ error: 'OpenStreetMap providers are unavailable. Try again later.' }, { status: 502 });
+    }
+
     // Merge and deduplicate by OSM node id
     const seen = new Set<number>();
     const webcams: NormWebcam[] = [];
@@ -62,7 +68,7 @@ export async function GET() {
     for (const result of settled) {
       if (result.status !== 'fulfilled') continue;
       for (const el of result.value) {
-        if (!el.lat || !el.lon) continue;
+        if (!hasCoordinates(el)) continue;
         if (seen.has(el.id)) continue;
         seen.add(el.id);
 
@@ -70,7 +76,7 @@ export async function GET() {
           el.tags?.['contact:webcam'] ??
           el.tags?.['webcam'] ??
           '';
-        if (!webcamUrl) continue;
+        if (!isPublicWebUrl(webcamUrl)) continue;
 
         webcams.push({
           id:         `osm-${el.id}`,

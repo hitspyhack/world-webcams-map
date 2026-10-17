@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 export interface CamLightboxEntry {
@@ -28,45 +28,47 @@ interface Props {
 }
 
 export default function CamLightbox({ entry, onClose }: Props) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
+  const isOpen = !!entry;
+  const [snapshotEntry, setSnapshotEntry] = useState<CamLightboxEntry | null>(null);
 
-  // Keyboard: Escape closes
+  // Native modal dialogs make the background inert and contain keyboard focus,
+  // including when the webcam is a cross-origin iframe.
   useEffect(() => {
-    if (!entry) return;
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [entry, onClose]);
-
-  // Scroll-lock while open
-  useEffect(() => {
-    if (!entry) return;
-    const prev = document.body.style.overflow;
+    if (!isOpen) return;
+    const dialog = dialogRef.current;
+    const previousFocus = document.activeElement;
+    const previousOverflow = document.body.style.overflow;
+    dialog?.showModal();
+    closeBtnRef.current?.focus();
     document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = prev; };
-  }, [entry]);
-
-  // Focus close button when opened
-  useEffect(() => {
-    if (entry) setTimeout(() => closeBtnRef.current?.focus(), 60);
-  }, [entry]);
+    return () => {
+      dialog?.close();
+      document.body.style.overflow = previousOverflow;
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();
+    };
+  }, [isOpen]);
 
   if (!entry) return null;
 
   const accentColor = SOURCE_COLORS[entry.source] ?? '#8b949e';
   const sourceLabel = entry.source.toUpperCase();
 
-  const hasEmbed = !!entry.embedUrl;
+  const hasEmbed = !!entry.embedUrl && snapshotEntry !== entry;
   const hasImage = !!entry.imageUrl;
 
   const content = (
-    <div
-      role="dialog"
+    <dialog
+      ref={dialogRef}
+      onCancel={e => { e.preventDefault(); onClose(); }}
       aria-modal="true"
       aria-label={`Live feed: ${entry.title}`}
       onClick={onClose}
       style={{
         position: 'fixed', inset: 0, zIndex: 99999,
+        margin: 0, border: 0, width: '100%', height: '100%',
+        maxWidth: 'none', maxHeight: 'none', color: '#e6edf3',
         background: 'rgba(0,0,0,0.82)',
         backdropFilter: 'blur(8px)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -85,6 +87,7 @@ export default function CamLightbox({ entry, onClose }: Props) {
           boxShadow: `0 0 0 1px ${accentColor}22, 0 24px 64px rgba(0,0,0,0.8)`,
           width: '100%',
           maxWidth: 860,
+          maxHeight: 'calc(100dvh - 64px)',
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
@@ -127,7 +130,7 @@ export default function CamLightbox({ entry, onClose }: Props) {
         </div>
 
         {/* Body */}
-        <div style={{ position: 'relative', flexGrow: 1 }}>
+        <div style={{ position: 'relative', flexGrow: 1, overflowY: 'auto', minHeight: 0 }}>
           {hasEmbed && (
             <div style={{ position: 'relative', paddingBottom: '56.25%' /* 16:9 */ }}>
               <iframe
@@ -145,21 +148,7 @@ export default function CamLightbox({ entry, onClose }: Props) {
           )}
 
           {!hasEmbed && hasImage && (
-            <div style={{
-              background: '#0d1117',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              minHeight: 260,
-            }}>
-              <img
-                src={entry.imageUrl}
-                alt={entry.title}
-                style={{
-                  maxWidth: '100%', maxHeight: '70vh',
-                  objectFit: 'contain', display: 'block',
-                }}
-                onError={e => { (e.target as HTMLImageElement).alt = '(image unavailable)'; }}
-              />
-            </div>
+            <ImagePreview key={entry.imageUrl} src={entry.imageUrl!} title={entry.title} />
           )}
 
           {!hasEmbed && !hasImage && (
@@ -174,15 +163,21 @@ export default function CamLightbox({ entry, onClose }: Props) {
         </div>
 
         {/* Footer */}
-        {entry.linkUrl && (
+        {(entry.linkUrl || (entry.embedUrl && entry.imageUrl)) && (
           <div style={{
             padding: '8px 16px',
             borderTop: '1px solid #21262d',
             background: 'rgba(22,27,34,0.9)',
             display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-            flexShrink: 0,
+            flexShrink: 0, gap: 12, flexWrap: 'wrap',
           }}>
-            <a
+            {hasEmbed && <span style={{ flex: 1, fontSize: 11, color: '#8b949e' }}>Feed not playing? The provider may require opening its website.</span>}
+            {entry.embedUrl && entry.imageUrl && (
+              <button type="button" className="explorer-secondary" onClick={() => setSnapshotEntry(hasEmbed ? entry : null)}>
+                {hasEmbed ? 'Show snapshot' : 'Show player'}
+              </button>
+            )}
+            {entry.linkUrl && <a
               href={entry.linkUrl}
               target="_blank"
               rel="noopener noreferrer"
@@ -193,7 +188,7 @@ export default function CamLightbox({ entry, onClose }: Props) {
               }}
             >
               {entry.linkLabel ?? 'Open source'} ↗
-            </a>
+            </a>}
           </div>
         )}
       </div>
@@ -209,9 +204,31 @@ export default function CamLightbox({ entry, onClose }: Props) {
         @keyframes lb-fade-in  { from { opacity:0 } to { opacity:1 } }
         @keyframes lb-slide-up { from { opacity:0; transform:translateY(18px) scale(0.97) } to { opacity:1; transform:none } }
       `}</style>
-    </div>
+    </dialog>
   );
 
   if (typeof window === 'undefined') return null;
   return createPortal(content, document.body);
+}
+
+function ImagePreview({ src, title }: { src: string; title: string }) {
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+
+  return (
+    <div style={{ background: '#0d1117', minHeight: 220, display: 'grid', placeItems: 'center' }}>
+      {failed ? (
+        <div role="status" style={{ padding: 24, textAlign: 'center', fontFamily: 'system-ui', color: '#8b949e' }}>
+          <p>Snapshot unavailable. Try again, or use the source link if available.</p>
+          <button type="button" onClick={() => { setFailed(false); setAttempt(value => value + 1); }}
+            style={{ padding: '8px 14px', borderRadius: 6, border: '1px solid #30363d', background: '#21262d', color: '#e6edf3', cursor: 'pointer' }}>
+            Retry snapshot
+          </button>
+        </div>
+      ) : (
+        <img key={attempt} src={src} alt={title} onError={() => setFailed(true)}
+          style={{ maxWidth: '100%', maxHeight: '65dvh', objectFit: 'contain', display: 'block' }} />
+      )}
+    </div>
+  );
 }

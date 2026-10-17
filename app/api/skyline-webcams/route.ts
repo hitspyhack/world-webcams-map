@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { hasCoordinates, isPublicWebUrl } from '../../../lib/cameras';
 
 // ---------------------------------------------------------------------------
 // Free replacement for the previous Apify-based SkylineWebcams scraper.
@@ -57,30 +58,23 @@ function buildQuery(s: number, w: number, n: number, e: number): string {
   const bbox = `${s},${w},${n},${e}`;
   return [
     '[out:json][timeout:25];',
-    `node["man_made"="surveillance"]["surveillance:type"="camera"](${bbox});`,
+    `(node["contact:webcam"](${bbox});node["webcam"](${bbox}););`,
     'out body 300;',
   ].join('');
 }
 
 function toItem(node: OverpassNode): SkylineItem | null {
+  if (!hasCoordinates(node) || !node.tags) return null;
   const t = node.tags;
-  // Must have a name or description to be useful
-  const title = t.name || t.description || t['camera:type'] || '';
-  if (!title) return null;
-
-  // Optional snapshot — some nodes link to a live image
-  const snapshotUrl =
-    t['contact:webcam'] ||
-    t.url ||
-    t.website ||
-    t['image'] ||
-    '';
-
-  // Derive a stable URL for the camera
-  const url = t['contact:webcam'] || t.url || t.website || `https://www.openstreetmap.org/node/${node.id}`;
+  const title = t.name || t.description || 'Community webcam';
+  // A mapped surveillance camera without a public webcam URL is not a feed.
+  const url = t['contact:webcam'] || t.webcam || '';
+  if (!isPublicWebUrl(url)) return null;
+  const image = isPublicWebUrl(t.image) ? t.image : url;
+  const snapshotUrl = /\.(?:jpe?g|png|webp)(?:[?#]|$)|snapshot/i.test(image) ? image : '';
 
   return {
-    id: `osm-surv-${node.id}`,
+    id: `community-${node.id}`,
     url,
     title: title.slice(0, 120),
     snapshotUrl,
@@ -107,9 +101,16 @@ export async function POST() {
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: `data=${encodeURIComponent(buildQuery(s, w, n, e))}`,
           signal: AbortSignal.timeout(30_000),
-        }).then(r => r.json() as Promise<OverpassResult>)
+        }).then(r => {
+          if (!r.ok) throw new Error(`Overpass HTTP ${r.status}`);
+          return r.json() as Promise<OverpassResult>;
+        })
       )
     );
+
+    if (settled.every(result => result.status === 'rejected')) {
+      return NextResponse.json({ error: 'Community webcam provider is unavailable. Try again later.' }, { status: 502 });
+    }
 
     const seen = new Set<string>();
     const items: SkylineItem[] = [];

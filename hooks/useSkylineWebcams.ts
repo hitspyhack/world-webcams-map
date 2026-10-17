@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SkylineItem } from '../types/webcam';
 
 interface UseSkylineWebcamsOptions {
@@ -28,23 +28,28 @@ interface UseSkylineWebcamsResult {
  * Note: Apify actor runs are slow (5-30 s). Results are not
  * viewport-bound — the actor returns results for the given location string.
  *
- * Must be used inside a react-leaflet <MapContainer>.
+ * Disabling or changing location cancels the previous request.
  */
 export function useSkylineWebcams({
   location = 'World',
   enabled = true,
 }: UseSkylineWebcamsOptions = {}): UseSkylineWebcamsResult {
+  const abortRef = useRef<AbortController | null>(null);
   const [webcams, setWebcams] = useState<SkylineItem[]>([]);
   const [loading, setLoading]  = useState(false);
   const [error, setError]      = useState<string | null>(null);
 
   const fetchCams = useCallback(async (loc: string) => {
     if (!enabled) return;
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     setLoading(true);
     setError(null);
     try {
       const res = await fetch('/api/skyline-webcams', {
         method: 'POST',
+        signal: ctrl.signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ location: loc }),
       });
@@ -53,15 +58,20 @@ export function useSkylineWebcams({
         throw new Error(j?.error ?? `HTTP ${res.status}`);
       }
       const data: unknown = await res.json();
-      setWebcams(Array.isArray(data) ? data : []);
+      if (!ctrl.signal.aborted) setWebcams(Array.isArray(data) ? data : []);
     } catch (err: unknown) {
+      if (ctrl.signal.aborted) return;
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setLoading(false);
+      if (abortRef.current === ctrl && !ctrl.signal.aborted) setLoading(false);
     }
   }, [enabled]);
 
-  useEffect(() => { fetchCams(location); }, [location, fetchCams]);
+  useEffect(() => {
+    if (enabled) void fetchCams(location);
+    else { setWebcams([]); setLoading(false); setError(null); }
+    return () => { abortRef.current?.abort(); };
+  }, [enabled, location, fetchCams]);
 
   return {
     webcams,

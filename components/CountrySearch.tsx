@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useId } from 'react';
 
 export interface CountryEntry {
   code: string;   // ISO-3166-1 alpha-2 or best-guess
@@ -17,6 +17,7 @@ interface Props {
 }
 
 export default function CountrySearch({ countries, selected, onSelect }: Props) {
+  const listId = useId();
   const [query, setQuery]       = useState(selected?.name ?? '');
   const [open,  setOpen]        = useState(false);
   const [cursor, setCursor]     = useState(-1);
@@ -38,9 +39,10 @@ export default function CountrySearch({ countries, selected, onSelect }: Props) 
 
   const filtered = useMemo(() => {
     if (!query.trim()) return countries.slice(0, 60);
-    const q = query.toLowerCase();
+    const normalize = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const q = normalize(query.trim());
     return countries.filter(c =>
-      c.name.toLowerCase().includes(q) || c.code.toLowerCase().startsWith(q)
+      normalize(c.name).includes(q) || c.code.toLowerCase().startsWith(q)
     ).slice(0, 60);
   }, [query, countries]);
 
@@ -54,31 +56,44 @@ export default function CountrySearch({ countries, selected, onSelect }: Props) 
   const handleClear = () => {
     setQuery('');
     setOpen(false);
+    setCursor(-1);
     onSelect(null);
     inputRef.current?.focus();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'ArrowDown') {
+    if (e.nativeEvent.isComposing) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
-      setCursor(c => Math.min(c + 1, filtered.length - 1));
       setOpen(true);
-    } else if (e.key === 'ArrowUp') {
+      setCursor(c => {
+        if (!filtered.length) return -1;
+        if (!open || c < 0) return e.key === 'ArrowDown' ? 0 : filtered.length - 1;
+        return Math.max(0, Math.min(c + (e.key === 'ArrowDown' ? 1 : -1), filtered.length - 1));
+      });
+    } else if (open && e.key === 'Enter' && cursor >= 0 && filtered[cursor]) {
       e.preventDefault();
-      setCursor(c => Math.max(c - 1, 0));
-    } else if (e.key === 'Enter' && cursor >= 0 && filtered[cursor]) {
       handleSelect(filtered[cursor]);
-    } else if (e.key === 'Escape') {
-      if (open) { setOpen(false); }
-      else { handleClear(); }
+    } else if (e.key === 'Escape' && open) {
+      e.preventDefault();
+      e.stopPropagation();
+      setOpen(false);
+      setCursor(-1);
+      setQuery(selected?.name ?? '');
+    } else if (e.key === 'Tab') {
+      setOpen(false);
+      setCursor(-1);
     }
   };
+
+  // Results can change while data sources are still loading.
+  const activeCountry = open && cursor >= 0 ? filtered[cursor] : undefined;
 
   // Scroll active item into view
   useEffect(() => {
     if (cursor >= 0 && listRef.current) {
       const el = listRef.current.children[cursor] as HTMLElement | undefined;
-      el?.scrollIntoView({ block: 'nearest' });
+      el?.scrollIntoView?.({ block: 'nearest' });
     }
   }, [cursor]);
 
@@ -87,7 +102,7 @@ export default function CountrySearch({ countries, selected, onSelect }: Props) 
       ref={wrapRef}
       style={{
         position: 'fixed', top: 14, left: '50%', transform: 'translateX(-50%)',
-        zIndex: 3000, width: 320, maxWidth: 'calc(100vw - 160px)',
+        zIndex: 3000, width: 320, maxWidth: 'calc(100vw - 190px)',
         fontFamily: 'system-ui, monospace',
       }}
     >
@@ -105,16 +120,27 @@ export default function CountrySearch({ countries, selected, onSelect }: Props) 
         <input
           ref={inputRef}
           type="text"
+          role="combobox"
+          autoComplete="off"
+          aria-controls={open ? listId : undefined}
+          aria-activedescendant={activeCountry ? `${listId}-${activeCountry.code}` : undefined}
           placeholder="Search country…"
           value={query}
           onChange={e => { setQuery(e.target.value); setOpen(true); setCursor(-1); }}
-          onFocus={() => setOpen(true)}
+          onFocus={() => { setOpen(true); setCursor(-1); }}
+          onBlur={e => {
+            if (!wrapRef.current?.contains(e.relatedTarget as Node | null)) {
+              setOpen(false);
+              setCursor(-1);
+              setQuery(selected?.name ?? '');
+            }
+          }}
           onKeyDown={handleKeyDown}
           aria-label="Search country"
           aria-autocomplete="list"
           aria-expanded={open}
           style={{
-            flex: 1, background: 'transparent', border: 'none', outline: 'none',
+            flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none',
             color: '#e6edf3', fontSize: 13, padding: '9px 0',
             letterSpacing: '0.02em',
           }}
@@ -139,6 +165,7 @@ export default function CountrySearch({ countries, selected, onSelect }: Props) 
       {open && filtered.length > 0 && (
         <ul
           ref={listRef}
+          id={listId}
           role="listbox"
           aria-label="Country suggestions"
           style={{
@@ -153,8 +180,10 @@ export default function CountrySearch({ countries, selected, onSelect }: Props) 
           {filtered.map((c, i) => (
             <li
               key={c.code}
+              id={`${listId}-${c.code}`}
+              onMouseDown={e => e.preventDefault()}
               role="option"
-              aria-selected={i === cursor}
+              aria-selected={selected?.code === c.code}
               onClick={() => handleSelect(c)}
               style={{
                 display: 'flex', alignItems: 'center',
@@ -182,13 +211,13 @@ export default function CountrySearch({ countries, selected, onSelect }: Props) 
       )}
 
       {open && query.trim() && filtered.length === 0 && (
-        <div style={{
+        <div role="status" style={{
           background: 'rgba(13,17,23,0.98)',
           border: '1px solid #30363d', borderTop: 'none',
           borderRadius: '0 0 9px 9px',
           padding: '12px 14px', fontSize: 12, color: '#8b949e',
           boxShadow: '0 8px 24px rgba(0,0,0,0.7)',
-        }}>No countries found for "{query}"</div>
+        }}>No countries found for &quot;{query}&quot;</div>
       )}
     </div>
   );

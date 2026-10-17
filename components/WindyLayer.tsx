@@ -1,6 +1,7 @@
 'use client';
 
-import L from 'leaflet';
+import { createCameraIcon } from '../lib/mapIcons';
+import { hasCoordinates } from '../lib/cameras';
 import { useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Marker, Popup, useMap } from 'react-leaflet';
@@ -8,19 +9,6 @@ import { useWindyWebcams } from '../hooks/useWindyWebcams';
 import type { WindyWebcam } from '../types/webcam';
 import type { CamLightboxEntry } from './CamLightbox';
 import type { CountryEntry } from './CountrySearch';
-
-const SHADOW_URL = 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png';
-const MARKER_URL = 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png';
-
-function makeIcon() {
-  return new L.Icon({
-    iconUrl: MARKER_URL,
-    iconRetinaUrl: MARKER_URL.replace('.png', '-2x.png'),
-    shadowUrl: SHADOW_URL,
-    iconSize: [25, 41], iconAnchor: [12, 41],
-    popupAnchor: [1, -34], shadowSize: [41, 41],
-  });
-}
 
 /**
  * Guard that a cam has valid coords, a non-empty title, AND at least a
@@ -33,7 +21,7 @@ function isPopulated(cam: WindyWebcam): boolean {
   const loc = cam.location;
   if (!loc) return false;
   const { latitude: lat, longitude: lon } = loc;
-  if (lat == null || lon == null || !isFinite(lat) || !isFinite(lon)) return false;
+  if (!hasCoordinates({ lat, lon })) return false;
   if (!cam.title?.trim()) return false;
 
   // API v3 uses `image` (singular); some internal shapes use `images`
@@ -91,7 +79,7 @@ export default function WindyLayer({
   debounceMs = 600,
   limit = 50,
 }: WindyLayerProps) {
-  const icon = useMemo(makeIcon, []);
+  const icon = useMemo(() => createCameraIcon('#60a5fa'), []);
   const overlayEl = useOverlayDiv('windy-status-overlay');
 
   const { webcams, loading, error, missingKey } = useWindyWebcams({

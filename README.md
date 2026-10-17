@@ -1,131 +1,125 @@
 # 🌍 World Webcams Map
 
-A **Next.js 15 + React-Leaflet** application that aggregates public webcam feeds
-from multiple open-source and public-API sources and displays them on an
-interactive world map.
+Explore public webcam locations on a rotating globe or an interactive map.
+Built with **Next.js 15, React, React-Leaflet, D3 Geo, and TopoJSON**.
 
----
+## Explore your next view
 
-## Sources
+- **Globe & map:** drag to rotate, pause/resume rotation, or switch to the map.
+  Globe code and low-resolution country boundaries are bundled locally—no
+  third-party script CDN is required. Source-colored map pins are self-contained
+  SVGs, too. CARTO map tiles still need internet access.
+- **Camera explorer:** search place names or sources, try **Surprise me**, and
+  locate a camera on the map. Discovery respects country and source filters.
+- **Saved views:** star cameras to keep them in your browser. The Saved tab is
+  independent of discovery filters. Favorites stay on your device; no account
+  is required. If storage is blocked, they last for the current session only.
+- **Source health:** see which sources loaded, timed out, need configuration,
+  or returned partial results. Refresh one provider or all providers. Previously
+  loaded results remain available if a refresh fails.
+- **Accessible viewer:** keyboard-friendly modal with Escape dismissal and
+  restored focus. Switch between player and snapshot when both are available;
+  retry failed snapshots or open the provider website.
+- **Country search:** accent-insensitive matching and ISO country codes. Use
+  Up/Down to navigate, Enter to select, and Escape to dismiss without clearing
+  the current filter. Use the clear button to remove it.
 
-| Source | Type | Key required |
-|---|---|---|
-| **Windy Webcams** | REST API v3 — ~65 k global cameras | `WINDY_WEBCAMS_API_KEY` |
-| **SkylineWebcams** | Apify actor scraper — live snapshots | `APIFY_TOKEN` |
-| **EarthCam** | Static curated dataset | — |
-| **OpenStreetMap / Overpass** | `contact:webcam` tagged nodes | — |
-| **Deckchair** | Beach & outdoor cams | — |
-| **EU Traffic (by country)** | Road traffic cameras per EU country | — |
-| **Asia** | Tourism & traffic cameras (Japan, Thailand, etc.) | — |
+Camera counts describe **listed locations**, not verified live streams. Provider
+websites can restrict embedding, change URLs, or go offline. An empty selection
+stays empty; the app does not substitute demo markers.
 
----
+## Getting started
 
-## Getting Started
-
-### 1. Install dependencies
+Requires **Node.js 22.12 or newer** (Node 22 LTS recommended).
 
 ```bash
-npm install
-```
-
-### 2. Configure environment variables
-
-```bash
+npm ci
 cp .env.example .env.local
-```
-
-Edit `.env.local` and add your keys:
-
-```env
-WINDY_WEBCAMS_API_KEY=your_windy_webcams_api_key_here
-APIFY_TOKEN=your_apify_token_here
-```
-
-> `.env.local` is already git-ignored — never commit real credentials.
-
-### 3. Run the dev server
-
-```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open http://localhost:3000. Most sources need no key. Add an optional
+`WINDY_WEBCAMS_API_KEY` to `.env.local` to enable Windy. No Apify token is used.
+Never commit `.env.local` or real credentials.
 
----
+## Data sources & routes
 
-## API Routes
+| Route | Method | Data | Key |
+|---|---|---|---|
+| `/api/windy-webcams` | GET | Windy API v3; accepts `bbox=north,east,south,west` and a positive integer `limit` (capped at 50) | Optional Windy key |
+| `/api/skyline-webcams` | POST | Legacy route name; now public OSM webcam links, **not** a Skyline/Apify scraper | None |
+| `/api/earthcam` | GET | Curated EarthCam locations | None |
+| `/api/overpass-webcams` | GET | OSM nodes with public webcam URLs; mirrored Overpass queries | None |
+| `/api/deckchair` | GET | Curated scenic webcam links; not a live Deckchair API | None |
+| `/api/eu-traffic` | GET | Country-provider aggregation; optional `countries=PT,FR,...` | None |
+| `/api/asia-tourism` | GET | Curated Asian tourism webcam links | None |
+| `/api/asia-traffic` | GET | Country-provider aggregation; optional `countries=SG,JP,KR,TW,TH` | None |
 
-| Route | Method | Description |
-|---|---|---|
-| `/api/windy-webcams` | `GET` | Proxies Windy API v3. Accepts `bbox=N,E,S,W` and `limit=N`. |
-| `/api/skyline-webcams` | `POST` | Runs Apify actor. Body: `{ "location": "Paris" }`. |
-| `/api/earthcam` | `GET` | Returns curated EarthCam dataset. |
-| `/api/overpass-webcams` | `GET` | Queries OSM Overpass for `contact:webcam` nodes (cached 1 h). |
-| `/api/deckchair` | `GET` | Returns Deckchair beach cam dataset. |
-| `/api/eu-traffic` | `GET` | EU road traffic cameras by country. |
-| `/api/asia-tourism` | `GET` | Asia tourism webcams. |
-| `/api/asia-traffic` | `GET` | Asia traffic cameras. |
+The explorer loads Singapore traffic and Asian tourism separately. Other Asian
+traffic endpoints are available through the aggregate API. Traffic aggregators
+invoke local provider handlers directly rather than making HTTP requests back to
+the incoming host. Partial failures are identified in the
+`X-Webcam-Failed-Countries` response header; complete failures return an error.
+The legacy community route excludes mapped surveillance locations without a
+public webcam link.
 
----
+## Reliability
 
-## Project Structure
+- Initial sources load independently, with a 35-second client deadline and
+  per-source cancellation. A slow provider does not block usable results.
+- Source refreshes cancel older work and ignore late responses.
+- Windy map requests are viewport-aware, debounced by 600 ms, and cancelled on
+  disable/unmount. Coordinates at zero are valid. Unwrapped longitudes are
+  normalized; dateline-crossing viewports use the full longitude range because
+  the upstream bounding box cannot span the dateline.
+- A missing Windy key is a configuration state, not an error.
+- Globe markers on the hidden hemisphere are neither drawn nor clickable.
+  Automatic rotation respects reduced-motion preferences and stops on selection.
 
-```
-├── app/
-│   ├── api/                  # Next.js API routes (one dir per source)
-│   ├── page.tsx              # Root page (renders MapClient)
-│   ├── layout.tsx
-│   └── globals.css
-├── components/
-│   ├── LeafletMap.tsx        # Main map component with all layers
-│   ├── MapClient.tsx         # 'use client' dynamic import wrapper
-│   ├── AsiaWebcamsLayer.tsx  # Asia sources layer
-│   └── EUTrafficLayer.tsx    # EU traffic layer
-├── hooks/
-│   ├── useWindyWebcams.ts    # Viewport-aware Windy fetch hook
-│   └── useSkylineWebcams.ts  # Skyline fetch hook with refetch
-├── types/
-│   └── webcam.ts             # Shared TypeScript interfaces for all sources
-├── .env.example              # Documents required environment variables
-└── next.config.mjs
-```
+## Development checks
 
----
-
-## Viewport-aware Fetching
-
-`hooks/useWindyWebcams.ts` provides a react-leaflet hook that:
-
-- Re-fetches Windy cameras whenever the map viewport changes (`moveend` / `zoomend`)
-- Debounces requests by 600 ms to avoid hammering the API while panning
-- Uses `AbortController` to cancel in-flight requests when a new viewport event fires
-- Respects the free-tier limit of 50 cameras per request
-
-To use it in a custom layer component:
-
-```tsx
-import { useWindyWebcams } from '../hooks/useWindyWebcams';
-
-function WindyLayer({ enabled }: { enabled: boolean }) {
-  const { webcams, loading, error } = useWindyWebcams({ enabled });
-  // render <Marker> for each webcam …
-}
+```bash
+npm run lint
+npm run typecheck
+npm test
+npm run test:watch
+npm run build
 ```
 
----
+GitHub Actions runs lint, type checking, tests, and a production build on pushes
+and pull requests. Tests mock providers and require no keys or live feeds. They
+cover favorites, source loading/cancellation, geographic validation, API
+validation, partial failures, search, and viewer lifecycle. Native dialog focus
+containment is browser-provided; unit tests use a dialog shim.
 
-## Deployment
+## Structure
 
-This is a standard Next.js app. Deploy to **Vercel** (recommended) or any
-Node-compatible host.
+- `components/MapClient.tsx` — filters, source data, view switching, explorer
+- `components/GlobeView.tsx` — canvas globe, camera drawer, rotation
+- `components/LeafletMap.tsx` — map layers and source controls
+- `components/CameraExplorer.tsx` — discovery, local favorites, source health
+- `components/CamLightbox.tsx` — player/snapshot modal
+- `hooks/useWebcamFeeds.ts` — progressive source loading and refresh
+- `lib/` — geographic validation, persistence parsing, metadata, aggregation
+- `app/api/` — source adapters and curated location datasets
+- `tests/` — component, hook, utility, and API regression tests
 
-Set the same environment variables (`WINDY_WEBCAMS_API_KEY`, `APIFY_TOKEN`) as
-[environment variables in your Vercel project settings](https://vercel.com/docs/environment-variables).
+## Deployment & limitations
 
----
+Deploy as a standard Next.js app on Vercel or another Node-compatible host.
+Set the optional Windy key in deployment environment settings. Provider feeds,
+external images, and map tiles require internet access and may have regional,
+rate, or embedding restrictions. Saved views are browser-local, not cloud-synced.
+
+The dependency audit currently reports advisories in the ESLint/fast-glob/braces
+**development-tooling** chain. There is no patched braces release in the registry
+used for this project; do not blindly apply `npm audit fix --force` (it proposes a
+Next ESLint config downgrade). Recheck when a compatible patch is available.
 
 ## Attribution
 
-- Webcam data provided by [windy.com](https://www.windy.com) — Windy Webcams API v3
-- Map tiles © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright)
-- SkylineWebcams data via [Apify](https://apify.com)
+- Webcam data and links belong to their respective providers, including
+  [Windy](https://www.windy.com), EarthCam, tourism sites, and traffic authorities.
+- Map tiles and community data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright).
+- Dark map basemap © [CARTO](https://carto.com/attributions).
+- Globe boundaries: [world-atlas / Natural Earth](https://github.com/topojson/world-atlas).

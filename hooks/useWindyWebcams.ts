@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useMap, useMapEvents } from 'react-leaflet';
+import { viewportBbox } from '../lib/viewport';
 import type { WindyWebcam } from '../types/webcam';
 
 export interface UseWindyWebcamsOptions {
@@ -54,7 +55,7 @@ export function useWindyWebcams({
     // Use forceBbox (or caller-supplied override) first, fall back to map viewport
     const bbox = overrideBbox ?? forceBbox ?? (() => {
       const b = map.getBounds();
-      return [b.getNorth(), b.getEast(), b.getSouth(), b.getWest()].join(',');
+      return viewportBbox(b.getNorth(), b.getEast(), b.getSouth(), b.getWest());
     })();
 
     setLoading(true);
@@ -66,6 +67,7 @@ export function useWindyWebcams({
         { signal: ctrl.signal },
       );
       const json = await res.json();
+      if (ctrl.signal.aborted) return;
 
       if (json?.missingKey) {
         keyMissing.current = true;
@@ -92,33 +94,33 @@ export function useWindyWebcams({
       setWebcams(list);
       setError(null);
     } catch (e: unknown) {
-      if ((e as Error)?.name === 'AbortError') return;
+      if (ctrl.signal.aborted || (e as Error)?.name === 'AbortError') return;
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoading(false);
+      // An older request must never finish the newer request's loading state.
+      if (abortRef.current === ctrl && !ctrl.signal.aborted) setLoading(false);
     }
   }, [enabled, limit, forceBbox, map]);
 
   // Debounced re-fetch on map move/zoom — only when NOT overriding with forceBbox
   const schedule = useCallback(() => {
-    if (forceBbox) return; // country filter active — don't override with viewport
+    if (!enabled || forceBbox || keyMissing.current) return; // country filter active — don't override with viewport
+    abortRef.current?.abort();
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => fetchCams(), debounceMs);
-  }, [fetchCams, debounceMs, forceBbox]);
+  }, [enabled, fetchCams, debounceMs, forceBbox]);
 
   useMapEvents({ moveend: schedule, zoomend: schedule });
 
-  // Re-fetch whenever enabled toggles or forceBbox changes
+  // Cancel both pending and in-flight work on a filter change, disable, or unmount.
   useEffect(() => {
-    if (enabled && !keyMissing.current) fetchCams();
+    if (enabled && !keyMissing.current) void fetchCams();
     if (!enabled) { setWebcams([]); setLoading(false); setError(null); }
-  // fetchCams already captures forceBbox via closure — this triggers on forceBbox change too
+    return () => {
+      abortRef.current?.abort();
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
   }, [enabled, fetchCams]);
-
-  useEffect(() => () => {
-    abortRef.current?.abort();
-    if (timerRef.current) clearTimeout(timerRef.current);
-  }, []);
 
   return { webcams, loading, error, missingKey };
 }

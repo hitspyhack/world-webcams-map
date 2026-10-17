@@ -2,7 +2,7 @@ import './globals.css';
 
 export const metadata = {
   title: 'World Webcams Map',
-  description: 'Windy + Skyline webcam world map',
+  description: 'Discover public webcams around the world. Explore the globe, save your favorite views, and follow tourism and traffic cameras.',
 };
 
 export default function RootLayout({

@@ -3,7 +3,6 @@ import { NextResponse } from 'next/server';
 // DGT (Dirección General de Tráfico) — open data, no key
 // https://datos.gob.es/es/catalogo/e00125901-catalogo-de-datos-de-trafico
 // The live camera feed is available as open JSON from the DGT open-data portal.
-const DGT_CAMERAS = 'https://infocar.dgt.es/etraffic/BuscarElementos?latNE=43.8&lonNE=3.3&latSW=35.9&lonSW=-9.3&zoom=6&accion=getRadares&datos_query=true&minLat=35.9&minLon=-9.3&maxLat=43.8&maxLon=3.3';
 const CCTV_URL     = 'https://infocar.dgt.es/etraffic/BuscarElementos?latNE=43.8&lonNE=3.3&latSW=35.9&lonSW=-9.3&zoom=6&accion=getCamaras&datos_query=true&minLat=35.9&minLon=-9.3&maxLat=43.8&maxLon=3.3';
 
 const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
