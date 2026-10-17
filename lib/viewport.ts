@@ -23,3 +23,10 @@ export function validBbox(value: string): boolean {
     && north <= 90 && south >= -90 && north >= south
     && east <= 180 && west >= -180 && east >= west;
 }
+
+/** Bounding envelope for discovery; exact radius filtering still happens locally. */
+export function radiusBbox(lat: number, lon: number, radiusKm: number): string {
+  const latitudeSpan = radiusKm / 111.2;
+  const longitudeSpan = Math.min(180, latitudeSpan / Math.max(.001, Math.cos(lat * Math.PI / 180)));
+  return viewportBbox(lat + latitudeSpan, lon + longitudeSpan, lat - latitudeSpan, lon - longitudeSpan);
+}

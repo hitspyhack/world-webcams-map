@@ -2,8 +2,12 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import CameraTools from './CameraTools';
+import VideoPreview from './VideoPreview';
+import { mediaLabel } from '../lib/media';
+import type { GlobeCam } from './GlobeView';
 
-export interface CamLightboxEntry {
+export interface CamLightboxEntry extends Partial<Pick<GlobeCam, 'lat' | 'lon' | 'positionPrecision' | 'description' | 'mediaKind' | 'videoUrl'>> {
   source: string;      // 'windy' | 'skyline' | 'earthcam' | 'osm' | 'deckchair' | 'eu' | 'asia'
   title: string;
   embedUrl?: string;   // iframe src — Windy player, EarthCam, Deckchair, EU/Asia sourceUrl
@@ -14,6 +18,7 @@ export interface CamLightboxEntry {
 }
 
 const SOURCE_COLORS: Record<string, string> = {
+  global: '#2dd4bf',
   windy:     '#60a5fa',
   skyline:   '#f87171',
   earthcam:  '#fb923c',
@@ -56,7 +61,8 @@ export default function CamLightbox({ entry, onClose }: Props) {
   const accentColor = SOURCE_COLORS[entry.source] ?? '#8b949e';
   const sourceLabel = entry.source.toUpperCase();
 
-  const hasEmbed = !!entry.embedUrl && snapshotEntry !== entry;
+  const hasVideo = !!entry.videoUrl && snapshotEntry !== entry;
+  const hasEmbed = !!entry.embedUrl && snapshotEntry !== entry && !hasVideo;
   const hasImage = !!entry.imageUrl;
 
   const content = (
@@ -64,7 +70,7 @@ export default function CamLightbox({ entry, onClose }: Props) {
       ref={dialogRef}
       onCancel={e => { e.preventDefault(); onClose(); }}
       aria-modal="true"
-      aria-label={`Live feed: ${entry.title}`}
+      aria-label={`Webcam workspace: ${entry.title}`}
       onClick={onClose}
       style={{
         position: 'fixed', inset: 0, zIndex: 99999,
@@ -109,7 +115,7 @@ export default function CamLightbox({ entry, onClose }: Props) {
             background: `${accentColor}18`, border: `1px solid ${accentColor}40`,
             borderRadius: 4, padding: '2px 6px', flexShrink: 0,
           }}>{sourceLabel}</span>
-          {(entry.embedUrl || entry.imageUrl) && <span style={{ fontSize: 9, fontWeight: 700, color: '#9fb0ba', flexShrink: 0 }}>{entry.embedUrl ? 'PLAYER LINK' : 'SNAPSHOT'}</span>}
+          <span style={{ fontSize: 9, fontWeight: 700, color: '#9fb0ba', maxWidth: 125 }}>{mediaLabel(entry)}</span>
           <span style={{
             flex: 1, fontSize: 14, fontWeight: 600,
             color: '#e6edf3', fontFamily: 'system-ui',
@@ -133,6 +139,7 @@ export default function CamLightbox({ entry, onClose }: Props) {
 
         {/* Body */}
         <div style={{ position: 'relative', flexGrow: 1, overflowY: 'auto', minHeight: 0 }}>
+          {hasVideo && <VideoPreview src={entry.videoUrl!} title={entry.title} />}
           {hasEmbed && (
             <div style={{ position: 'relative', paddingBottom: '56.25%' /* 16:9 */ }}>
               <iframe
@@ -149,11 +156,11 @@ export default function CamLightbox({ entry, onClose }: Props) {
             </div>
           )}
 
-          {!hasEmbed && hasImage && (
+          {!hasVideo && !hasEmbed && hasImage && (
             <ImagePreview key={entry.imageUrl} src={entry.imageUrl!} title={entry.title} />
           )}
 
-          {!hasEmbed && !hasImage && (
+          {!hasVideo && !hasEmbed && !hasImage && (
             <div style={{
               padding: '40px 24px', textAlign: 'center',
               color: '#8b949e', fontFamily: 'system-ui', fontSize: 14,
@@ -162,10 +169,11 @@ export default function CamLightbox({ entry, onClose }: Props) {
               <div>No embeddable content available for this source.</div>
             </div>
           )}
+          <CameraTools key={`${entry.source}-${entry.title}-${entry.lat}-${entry.lon}`} entry={entry} />
         </div>
 
         {/* Footer */}
-        {(entry.linkUrl || (entry.embedUrl && entry.imageUrl) || entry.captureAt) && (
+        {(entry.linkUrl || ((entry.embedUrl || entry.videoUrl) && entry.imageUrl) || entry.captureAt) && (
           <div style={{
             padding: '8px 16px',
             borderTop: '1px solid #21262d',
@@ -175,9 +183,9 @@ export default function CamLightbox({ entry, onClose }: Props) {
           }}>
             {hasEmbed && <span style={{ flex: 1, fontSize: 11, color: '#8b949e' }}>Feed not playing? The provider may require opening its website.</span>}
             {entry.captureAt && Number.isFinite(Date.parse(entry.captureAt)) && <span style={{ flex: 1, fontSize: 10, color: '#8b949e' }}>Provider capture: {new Date(entry.captureAt).toLocaleString()}</span>}
-            {entry.embedUrl && entry.imageUrl && (
-              <button type="button" className="explorer-secondary" onClick={() => setSnapshotEntry(hasEmbed ? entry : null)}>
-                {hasEmbed ? 'Show snapshot' : 'Show player'}
+            {(entry.embedUrl || entry.videoUrl) && entry.imageUrl && (
+              <button type="button" className="explorer-secondary" onClick={() => setSnapshotEntry(hasEmbed || hasVideo ? entry : null)}>
+                {hasEmbed || hasVideo ? 'Show snapshot' : 'Show player'}
               </button>
             )}
             {entry.linkUrl && <a
@@ -217,9 +225,40 @@ export default function CamLightbox({ entry, onClose }: Props) {
 function ImagePreview({ src, title }: { src: string; title: string }) {
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [currentSrc, setCurrentSrc] = useState(src);
+  const [auto, setAuto] = useState(false);
+  const [received, setReceived] = useState<string | null>(null);
+  const [refreshMessage, setRefreshMessage] = useState('');
+  const objectUrl = useRef<string | null>(null);
+  const active = useRef<AbortController | null>(null);
+  const refresh = async () => {
+    active.current?.abort();
+    const controller = new AbortController(); active.current = controller;
+    const timer = setTimeout(() => controller.abort(), 15_000);
+    try {
+      const response = await fetch(src, { mode: 'cors', credentials: 'omit', cache: 'no-store', signal: controller.signal });
+      if (!response.ok || !response.headers.get('content-type')?.startsWith('image/')) throw new Error('Not an image');
+      if (Number(response.headers.get('content-length')) > 20 * 1024 * 1024) throw new Error('Too large');
+      const blob = await response.blob();
+      if (controller.signal.aborted) return;
+      if (blob.size > 20 * 1024 * 1024) throw new Error('Too large');
+      if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
+      objectUrl.current = URL.createObjectURL(blob);
+      setCurrentSrc(objectUrl.current); setFailed(false); setRefreshMessage('Snapshot re-requested. Scene freshness depends on the provider.');
+    } catch { if (!controller.signal.aborted) { setAuto(false); setRefreshMessage('Browser refresh is blocked or unavailable. The existing preview may be cached. Use the provider website.'); } }
+    finally { clearTimeout(timer); }
+  };
+  const refreshRef = useRef(refresh); refreshRef.current = refresh;
+  useEffect(() => {
+    if (!auto) return;
+    const timer = setInterval(() => { if (!document.hidden) void refreshRef.current(); }, 30_000);
+    return () => clearInterval(timer);
+  }, [auto]);
+  useEffect(() => () => { active.current?.abort(); if (objectUrl.current) URL.revokeObjectURL(objectUrl.current); }, []);
 
   return (
     <div style={{ background: '#0d1117', minHeight: 220, display: 'grid', placeItems: 'center' }}>
+      <div className="snapshot-controls"><button onClick={() => void refresh()}>Refresh snapshot</button><label><input type="checkbox" checked={auto} onChange={event => setAuto(event.target.checked)} /> Refresh every 30s</label></div>
       {failed ? (
         <div role="status" style={{ padding: 24, textAlign: 'center', fontFamily: 'system-ui', color: '#8b949e' }}>
           <p>Snapshot unavailable. Try again, or use the source link if available.</p>
@@ -229,9 +268,11 @@ function ImagePreview({ src, title }: { src: string; title: string }) {
           </button>
         </div>
       ) : (
-        <img key={attempt} src={src} alt={title} onError={() => setFailed(true)}
+        <img key={attempt} src={currentSrc} alt={title} onLoad={() => setReceived(new Date().toISOString())} onError={() => setFailed(true)}
           style={{ maxWidth: '100%', maxHeight: '65dvh', objectFit: 'contain', display: 'block' }} />
       )}
+      {received && <small className="snapshot-observation">Image received by browser: {received}. Not a verified scene timestamp.</small>}
+      {refreshMessage && <p role="status" className="snapshot-observation">{refreshMessage}</p>}
     </div>
   );
 }

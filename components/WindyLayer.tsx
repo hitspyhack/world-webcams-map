@@ -5,6 +5,7 @@ import { hasCoordinates } from '../lib/cameras';
 import { useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Marker, Popup, useMap } from 'react-leaflet';
+import { mergeWindyCameras } from '../lib/windy';
 import { useWindyWebcams } from '../hooks/useWindyWebcams';
 import type { WindyWebcam } from '../types/webcam';
 import type { CamLightboxEntry } from './CamLightbox';
@@ -58,6 +59,7 @@ const BADGE_BASE: React.CSSProperties = {
 };
 
 interface WindyLayerProps {
+  extraCameras?: WindyWebcam[];
   enabled: boolean;
   onCountChange?: (count: number) => void;
   onMissingKey?: () => void;
@@ -70,6 +72,7 @@ interface WindyLayerProps {
 }
 
 export default function WindyLayer({
+  extraCameras = [],
   enabled,
   onCountChange,
   onMissingKey,
@@ -90,7 +93,7 @@ export default function WindyLayer({
   });
 
   const populated = useMemo(() => {
-    const base = webcams.filter(isPopulated);
+    const base = mergeWindyCameras(extraCameras, webcams).filter(isPopulated);
     if (!countryFilter) return base;
     const code = countryFilter.code.toUpperCase();
     const name = countryFilter.name.toLowerCase();
@@ -98,7 +101,7 @@ export default function WindyLayer({
       const cc = (c.location?.country ?? '').toUpperCase();
       return cc === code || cc.toLowerCase() === name;
     });
-  }, [webcams, countryFilter]);
+  }, [webcams, extraCameras, countryFilter]);
 
   const populatedCount = populated.length;
 
@@ -153,7 +156,7 @@ export default function WindyLayer({
                   <div
                     className="cam-preview-wrap"
                     style={{ position: 'relative', marginTop: 7, cursor: 'pointer' }}
-                    onClick={() => onExpand({ source: 'windy', title, embedUrl: playerUrl || undefined, imageUrl: preview || undefined, linkUrl: webcamUrl, linkLabel: 'Open on Windy' })}
+                    onClick={() => onExpand({ source: 'windy', title, lat, lon, mediaKind: cam.mediaKind, captureAt: cam.lastUpdatedOn, embedUrl: playerUrl || undefined, imageUrl: preview || undefined, linkUrl: webcamUrl, linkLabel: 'Open on Windy' })}
                   >
                     <img
                       src={preview} alt={title}
@@ -163,7 +166,7 @@ export default function WindyLayer({
                     />
                     <button
                       className="cam-expand-btn"
-                      onClick={e => { e.stopPropagation(); onExpand({ source: 'windy', title, embedUrl: playerUrl || undefined, imageUrl: preview || undefined, linkUrl: webcamUrl, linkLabel: 'Open on Windy' }); }}
+                      onClick={e => { e.stopPropagation(); onExpand({ source: 'windy', title, lat, lon, mediaKind: cam.mediaKind, captureAt: cam.lastUpdatedOn, embedUrl: playerUrl || undefined, imageUrl: preview || undefined, linkUrl: webcamUrl, linkLabel: 'Open on Windy' }); }}
                       aria-label="Expand to full view"
                       style={{
                         position: 'absolute', top: 6, right: 6,

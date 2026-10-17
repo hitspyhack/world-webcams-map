@@ -84,3 +84,14 @@ describe('local map pins', () => {
     expect(createCameraIcon('#ff8833', true).options.iconSize).toEqual([22, 30]);
   });
 });
+
+describe('OSINT export hygiene', () => {
+  it('neutralizes CSV formulas instead of relying only on CSV quotes', () => {
+    const csv = exportCameras([{ ...camera, title: '=IMPORTXML("https://example.com")' }], 'csv');
+    expect(csv).toContain('"\'=IMPORTXML');
+  });
+  it('keeps directory and coordinate-precision metadata in saved records', () => {
+    const [saved] = readSavedCameras(JSON.stringify([{ ...camera, mediaKind: 'directory', positionPrecision: 'regional', continent: 'Europe' }]));
+    expect(saved).toMatchObject({ mediaKind: 'directory', positionPrecision: 'regional', continent: 'Europe' });
+  });
+});

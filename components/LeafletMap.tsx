@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type L from 'leaflet';
+import type { GlobeCam } from './GlobeView';
 import { createCameraIcon } from '../lib/mapIcons';
 import { hasCoordinates } from '../lib/cameras';
+import { videoUrl } from '../lib/media';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import AsiaWebcamsLayer, { ASIA_SOURCES } from './AsiaWebcamsLayer';
 import EUTrafficLayer,   { EU_COUNTRIES }  from './EUTrafficLayer';
@@ -16,6 +18,7 @@ import type {
   EarthCamItem,
   OsmWebcam,
   DeckchairWebcam,
+  WindyWebcam,
 } from '../types/webcam';
 import type { SourceKey, FlyToTarget } from './MapClient';
 
@@ -33,6 +36,7 @@ interface AsiaCam {
 }
 
 const SOURCE_CONFIG: Record<SourceKey, { label: string; color: string }> = {
+  global: { label: 'Global operators', color: '#2dd4bf' },
   windy:     { label: 'Windy',     color: '#60a5fa' },
   skyline:   { label: 'Community',   color: '#f87171' },
   earthcam:  { label: 'EarthCam',  color: '#fb923c' },
@@ -98,7 +102,7 @@ function Legend({
     }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
         <span style={{ fontWeight: 700, fontSize: 11, letterSpacing: '0.06em', color: 'rgba(0,220,100,0.85)' }}>
-          LISTED CAMS {loading ? '⟳' : `(${totalCount.toLocaleString()})`}
+          LISTINGS {loading ? '⟳' : `(${totalCount.toLocaleString()})`}
         </span>
         <button aria-label="Toggle source layers" aria-expanded={open} onClick={() => setOpen(o => !o)}
           style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: 0 }}>
@@ -175,6 +179,8 @@ function Legend({
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 export interface LeafletMapProps {
+  globalCams?: GlobeCam[];
+  windyCatalog?: WindyWebcam[];
   skylineCams:  SkylineItem[];
   earthCams:    EarthCamItem[];
   osmCams:      OsmWebcam[];
@@ -202,6 +208,7 @@ export interface LeafletMapProps {
 
 // ── Inner map (must be child of MapContainer) ─────────────────────────────────
 function MapInner({
+  globalCams = [], windyCatalog = [],
   skylineCams, earthCams, osmCams, deckCams, euCams, asiaCams,
   visible, euVisible, asiaVisible,
   loading, errors,
@@ -240,6 +247,7 @@ function MapInner({
   useEffect(() => { onAsiaCount(asiaCount); }, [asiaCount, onAsiaCount]);
 
   const counts = useMemo<Partial<Record<string, number>>>(() => ({
+    global: globalCams.length,
     windy:     windyCount,  // use state — not the stale ref
     skyline:   skylineCams.length,
     earthcam:  earthCams.length,
@@ -253,7 +261,7 @@ function MapInner({
       (acc: Map<string, number>, [k, v]: [string, number]) => { acc.set(k, (acc.get(k) ?? 0) + v); return acc; },
       new Map<string, number>()
     )),
-  }), [windyCount, skylineCams, earthCams, osmCams, deckCams, euCams, asiaCams]);
+  }), [globalCams, windyCount, skylineCams, earthCams, osmCams, deckCams, euCams, asiaCams]);
 
   return (
     <>
@@ -266,8 +274,15 @@ function MapInner({
         countryFilter={countryFilter} onClearFilter={onClearFilter}
       />
 
+      {visible.global && globalCams.map(camera => (
+        <Marker key={camera.id ?? camera.title} position={[camera.lat, camera.lon]} icon={icons.global}>
+          <Popup><strong>{camera.title}</strong><p>{camera.description}</p><button className="explorer-secondary" onClick={() => setLightbox({ ...camera, source: 'global' })}>Open camera workspace</button></Popup>
+        </Marker>
+      ))}
+
       {/* ── Windy cameras — live viewport fetch via sub-component ─────────── */}
       <WindyLayer
+        extraCameras={windyCatalog}
         enabled={visible.windy}
         onCountChange={handleWindyCount}
         onExpand={setLightbox}
@@ -286,7 +301,7 @@ function MapInner({
                 <div style={{ fontSize: 11, color: '#8b949e', marginTop: 2 }}>{[cam.city, cam.country].filter(Boolean).join(', ')}</div>
                 {cam.snapshotUrl && (
                   <div style={{ marginTop: 7, cursor: 'pointer' }}
-                    onClick={() => setLightbox({ source: 'skyline', title: cam.title, imageUrl: cam.snapshotUrl, linkUrl: cam.url, linkLabel: 'Open webcam source' })}>
+                    onClick={() => setLightbox({ source: 'skyline', lat: cam.lat, lon: cam.lon, positionPrecision: 'approximate', title: cam.title, imageUrl: cam.snapshotUrl, linkUrl: cam.url, linkLabel: 'Open webcam source' })}>
                     <img src={cam.snapshotUrl} alt={cam.title}
                       style={{ maxWidth: 248, width: '100%', borderRadius: 6, display: 'block', background: '#0d1117' }}
                       loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
@@ -311,7 +326,7 @@ function MapInner({
                 <div style={{ fontSize: 11, color: '#8b949e', marginTop: 2 }}>{[cam.city, cam.country].filter(Boolean).join(', ')}</div>
                 {cam.imageUrl && (
                   <div style={{ marginTop: 7, cursor: 'pointer' }}
-                    onClick={() => setLightbox({ source: 'earthcam', title: cam.title, embedUrl: cam.embedUrl, imageUrl: cam.imageUrl, linkUrl: cam.embedUrl, linkLabel: 'EarthCam' })}>
+                    onClick={() => setLightbox({ source: 'earthcam', lat: cam.lat, lon: cam.lon, positionPrecision: 'approximate', title: cam.title, embedUrl: cam.embedUrl, imageUrl: cam.imageUrl, linkUrl: cam.embedUrl, linkLabel: 'EarthCam' })}>
                     <img src={cam.imageUrl} alt={cam.title}
                       style={{ maxWidth: 248, width: '100%', borderRadius: 6, display: 'block', background: '#0d1117' }}
                       loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
@@ -335,9 +350,10 @@ function MapInner({
                 <div style={{ fontSize: 11, color: '#8b949e', marginTop: 2 }}>{[cam.city, cam.country].filter(Boolean).join(', ')}</div>
                 {cam.webcamUrl && (
                   <div style={{ marginTop: 5 }}>
-                    <a href={cam.webcamUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11 }}>Open stream ↗</a>
+                    <a href={cam.webcamUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11 }}>Open webcam source ↗</a>
                   </div>
                 )}
+                <button className="explorer-secondary" onClick={() => setLightbox({ source: 'osm', title: cam.title, lat: cam.lat, lon: cam.lon, description: cam.description, positionPrecision: cam.positionPrecision ?? 'approximate', imageUrl: cam.thumbnailUrl, videoUrl: videoUrl(cam.webcamUrl), embedUrl: cam.thumbnailUrl || videoUrl(cam.webcamUrl) ? undefined : cam.webcamUrl, linkUrl: cam.webcamUrl })}>Open camera workspace</button>
                 <div style={{ marginTop: 4, fontSize: 10, color: '#4ade80', fontWeight: 700, letterSpacing: '0.04em' }}>SOURCE: OSM</div>
               </div>
             </Popup>
@@ -355,7 +371,7 @@ function MapInner({
                 <strong style={{ fontSize: 13 }}>{cam.title}</strong>
                 {cam.thumbnailUrl && (
                   <div style={{ marginTop: 7, cursor: 'pointer' }}
-                    onClick={() => setLightbox({ source: 'deckchair', title: cam.title, embedUrl: cam.embedUrl, imageUrl: cam.thumbnailUrl, linkLabel: 'Deckchair' })}>
+                    onClick={() => setLightbox({ source: 'deckchair', lat: cam.lat, lon: cam.lon, positionPrecision: 'approximate', linkUrl: cam.embedUrl, title: cam.title, embedUrl: cam.embedUrl, imageUrl: cam.thumbnailUrl, linkLabel: 'Deckchair' })}>
                     <img src={cam.thumbnailUrl} alt={cam.title}
                       style={{ maxWidth: 248, width: '100%', borderRadius: 6, display: 'block', background: '#0d1117' }}
                       loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />

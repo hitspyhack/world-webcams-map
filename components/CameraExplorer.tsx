@@ -1,8 +1,14 @@
 'use client';
 
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import WindyCatalog from './WindyCatalog';
+import { radiusBbox } from '../lib/viewport';
+import { countryCode } from '../lib/coverage';
+import type { OsmWebcam, WindyWebcam } from '../types/webcam';
+import { downloadCapture } from '../lib/capture';
+import { mediaLabel } from '../lib/media';
 import type { GlobeCam } from './GlobeView';
-import { cameraContextUrls, cameraKey, distanceKm, exportCameras, isPublicWebUrl, normalizeSearch, readCameraCollections, readSavedCameras, timestampedCaptureFilename } from '../lib/cameras';
+import { cameraContextUrls, cameraKey, distanceKm, exportCameras, isPublicWebUrl, normalizeSearch, readCameraCollections, readSavedCameras } from '../lib/cameras';
 import { FEEDS, type FeedKey, type FeedStates } from '../hooks/useWebcamFeeds';
 
 const STORAGE_KEY = 'world-webcams:saved:v1';
@@ -11,16 +17,22 @@ const LISTING_STALE_MS = 24 * 60 * 60 * 1000;
 
 interface Props {
   cameras: GlobeCam[];
+  onOsmBatch?: (cameras: OsmWebcam[]) => void;
+  onWindyBatch?: (cameras: WindyWebcam[]) => void;
   feeds: FeedStates;
   onRefresh: (key?: FeedKey) => void;
   onOpen: (camera: GlobeCam) => void;
   onLocate: (camera: GlobeCam) => void;
 }
 
-export default function CameraExplorer({ cameras, feeds, onRefresh, onOpen, onLocate }: Props) {
+export default function CameraExplorer({ onOsmBatch, onWindyBatch, cameras, feeds, onRefresh, onOpen, onLocate }: Props) {
   const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState<'discover' | 'saved' | 'sources'>('discover');
+  const [tab, setTab] = useState<'discover' | 'saved' | 'sources' | 'windy'>('discover');
   const [query, setQuery] = useState('');
+  const [media, setMedia] = useState('all');
+  const [continent, setContinent] = useState('all');
+  const [visibleCount, setVisibleCount] = useState(100);
+  useEffect(() => setVisibleCount(100), [query, media, continent, tab]);
   const [saved, setSaved] = useState<GlobeCam[]>([]);
   const [collections, setCollections] = useState(['Favorites']);
   const [activeCollection, setActiveCollection] = useState('Favorites');
@@ -29,6 +41,9 @@ export default function CameraExplorer({ cameras, feeds, onRefresh, onOpen, onLo
   const [longitude, setLongitude] = useState('');
   const [radiusKm, setRadiusKm] = useState('25');
   const [captureMessage, setCaptureMessage] = useState('');
+  const [discovering, setDiscovering] = useState(false);
+  const nearbyRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => nearbyRequest.current?.abort(), []);
   const [storageError, setStorageError] = useState(false);
   const panelId = useId();
 
@@ -79,6 +94,11 @@ export default function CameraExplorer({ cameras, feeds, onRefresh, onOpen, onLo
       ? saved.filter(camera => (camera.collection ?? 'Favorites') === activeCollection)
       : cameras;
     for (const camera of source) {
+      if (media === 'live' && camera.mediaKind !== 'live') continue;
+      if (media === 'snapshot' && !camera.imageUrl) continue;
+      if (media === 'directory' && camera.mediaKind !== 'directory') continue;
+      if (media === 'camera' && camera.mediaKind === 'directory') continue;
+      if (continent !== 'all' && camera.continent !== continent) continue;
       if (!normalizeSearch(`${camera.title} ${camera.source ?? ''} ${camera.city ?? ''} ${camera.country ?? ''} ${(camera.categories ?? []).join(' ')}`).includes(needle)) continue;
       unique.set(cameraKey(camera), camera);
     }
@@ -89,9 +109,27 @@ export default function CameraExplorer({ cameras, feeds, onRefresh, onOpen, onLo
       .filter(item => item.distance <= radius)
       .sort((a, b) => a.distance - b.distance)
       .map(item => item.camera);
-  }, [cameras, query, saved, tab, activeCollection, hasGeoCenter, validRadius, latitude, longitude, radius]);
+  }, [media, continent, cameras, query, saved, tab, activeCollection, hasGeoCenter, validRadius, latitude, longitude, radius]);
   const loading = Object.values(feeds).some(feed => feed.status === 'loading');
   const failures = Object.values(feeds).filter(feed => feed.status === 'error' || feed.warning).length;
+
+  const discoverNearby = async () => {
+    if (!hasGeoCenter || !validRadius) return;
+    nearbyRequest.current?.abort();
+    const controller = new AbortController(); nearbyRequest.current = controller;
+    const timer = setTimeout(() => controller.abort(), 32_000);
+    setDiscovering(true); setCaptureMessage('Discovering mapped public webcam URLs near these coordinates…');
+    try {
+      const query = new URLSearchParams({ bbox: radiusBbox(Number(latitude), Number(longitude), radius), limit: '500' });
+      const response = await fetch(`/api/overpass-webcams?${query}`, { signal: controller.signal });
+      if (!response.ok) throw new Error('Discovery provider unavailable');
+      const data = await response.json();
+      if (controller.signal.aborted) return;
+      if (!Array.isArray(data)) throw new Error('Unexpected response');
+      onOsmBatch?.(data); setCaptureMessage(`${data.length} public webcam listings returned for the bounding area. Radius, country, and source filters still apply; results are not live-verified.`);
+    } catch { if (nearbyRequest.current === controller) setCaptureMessage('Nearby discovery is unavailable or timed out. Try again later.'); }
+    finally { clearTimeout(timer); if (nearbyRequest.current === controller) setDiscovering(false); }
+  };
 
   const download = (format: 'csv' | 'geojson') => {
     const blob = new Blob([exportCameras(results, format)], { type: format === 'csv' ? 'text/csv;charset=utf-8' : 'application/geo+json;charset=utf-8' });
@@ -107,17 +145,8 @@ export default function CameraExplorer({ cameras, feeds, onRefresh, onOpen, onLo
     if (!isPublicWebUrl(camera.imageUrl)) return;
     setCaptureMessage('Requesting snapshot from its provider…');
     try {
-      const response = await fetch(camera.imageUrl, { mode: 'cors', credentials: 'omit' });
-      if (!response.ok) throw new Error('Provider refused the image request.');
-      const image = await response.blob();
-      if (!image.type.startsWith('image/')) throw new Error('Provider did not return an image.');
-      const url = URL.createObjectURL(image);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = timestampedCaptureFilename(camera, new Date(), image.type);
-      anchor.click();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      setCaptureMessage('Snapshot downloaded with local capture time in its filename.');
+      await downloadCapture(camera, AbortSignal.timeout(20_000));
+      setCaptureMessage('Capture ZIP downloaded with original image, retrieval time, source metadata, and SHA-256. Retrieval time is not scene time.');
     } catch {
       setCaptureMessage('Snapshot not downloaded. The provider may block browser capture; use its source link instead.');
     }
@@ -127,18 +156,18 @@ export default function CameraExplorer({ cameras, feeds, onRefresh, onOpen, onLo
     <aside className="camera-explorer" aria-label="Camera explorer">
       <button className="explorer-toggle" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(value => !value)}>
         <span>◈ Explore cameras</span>
-        <span className="explorer-count">{cameras.length.toLocaleString()} available {open ? '−' : '+'}</span>
+        <span className="explorer-count">{cameras.length.toLocaleString()} listings {open ? '−' : '+'}</span>
       </button>
-      {open && (
-        <div id={panelId} className="explorer-panel">
+      {(<div hidden={!open} id={panelId} className="explorer-panel">
           <div className="explorer-tabs" aria-label="Explorer sections">
-            {(['discover', 'saved', 'sources'] as const).map(item => (
+            {(['discover', 'saved', 'sources', 'windy'] as const).map(item => (
               <button key={item} aria-pressed={tab === item} onClick={() => setTab(item)}>
-                {item === 'saved' ? `Saved (${saved.length})` : item === 'sources' ? `Sources${failures ? ` · ${failures} issues` : ''}` : 'Discover'}
+                {item === 'saved' ? `Saved (${saved.length})` : item === 'sources' ? `Sources${failures ? ` · ${failures} issues` : ''}` : item === 'windy' ? 'Windy' : 'Discover'}
               </button>
             ))}
           </div>
-          {tab === 'sources' ? (
+          <div hidden={tab !== 'windy'}><WindyCatalog onBatch={onWindyBatch ?? (() => {})} /></div>
+          {tab === 'windy' ? null : tab === 'sources' ? (
             <div className="explorer-sources">
               <p className="explorer-hint">Sources load independently. Counts describe listed cameras, not verified live streams.</p>
               <button className="explorer-secondary" onClick={() => onRefresh()}>Refresh all sources</button>
@@ -160,6 +189,15 @@ export default function CameraExplorer({ cameras, feeds, onRefresh, onOpen, onLo
             </div>
           ) : (
             <>
+              <div className="coverage-summary" aria-label="Coverage summary">
+                <strong>{new Set(cameras.map(camera => countryCode(camera.country) ?? camera.country).filter(Boolean)).size} countries / territories</strong>
+                <span>{cameras.filter(camera => camera.mediaKind !== 'directory').length} camera listings · {cameras.filter(camera => camera.mediaKind === 'directory').length} operator directories</span>
+                <small>Loaded catalog coverage, not the full global inventory. Provider access and availability vary.</small>
+              </div>
+              <div className="discovery-filters">
+                <label>Media<select value={media} onChange={event => setMedia(event.target.value)}><option value="all">All listings</option><option value="camera">Camera listings only</option><option value="live">Provider-reported live players</option><option value="snapshot">Snapshots available</option><option value="directory">Operator directories</option></select></label>
+                <label>Region<select value={continent} onChange={event => setContinent(event.target.value)}><option value="all">All regions</option>{['Africa', 'Antarctica', 'Asia', 'Europe', 'North America', 'South America', 'Oceania'].map(value => <option key={value}>{value}</option>)}</select></label>
+              </div>
               <label className="explorer-search">
                 <span className="sr-only">Search cameras</span>
                 <input type="search" placeholder="Search place, country, or source…" value={query} onChange={event => setQuery(event.target.value)} />
@@ -187,6 +225,7 @@ export default function CameraExplorer({ cameras, feeds, onRefresh, onOpen, onLo
                 <label>Radius (km)
                   <input type="number" min="1" max="20000" step="1" value={radiusKm} onChange={event => setRadiusKm(event.target.value)} />
                 </label>
+                {onOsmBatch && <button className="explorer-secondary" disabled={!hasGeoCenter || !validRadius || discovering} onClick={() => void discoverNearby()}>{discovering ? 'Discovering…' : 'Load nearby public webcams'}</button>}
                 {((latitude !== '' || longitude !== '') && !hasGeoCenter) && <small role="status">Enter valid latitude and longitude.</small>}
                 {hasGeoCenter && !validRadius && <small role="status">Radius must be between 1 and 20,000 km.</small>}
               </fieldset>
@@ -202,14 +241,14 @@ export default function CameraExplorer({ cameras, feeds, onRefresh, onOpen, onLo
               {captureMessage && <p role="status" className="explorer-hint">{captureMessage}</p>}
               {storageError && <p role="status" className="explorer-hint">Browser storage is unavailable. Saved cameras will last for this session only.</p>}
               <ul className="explorer-results" aria-label={tab === 'saved' ? 'Saved cameras' : 'Camera results'}>
-                {results.slice(0, 100).map(camera => {
+                {results.slice(0, visibleCount).map(camera => {
                   const key = cameraKey(camera);
                   const isSaved = savedKeys.has(key);
                   return (
                     <li key={key}>
                       <div className="explorer-camera-title">
                         <button className="explorer-open" onClick={() => onOpen(camera)}>{camera.title}</button>
-                        <span className="camera-media-indicator">{camera.embedUrl ? 'PLAYER LINK' : camera.imageUrl ? 'SNAPSHOT' : 'SOURCE LINK'}</span>
+                        <span className="camera-media-indicator">{mediaLabel(camera)}</span>
                         <button className="explorer-icon" aria-label={`${isSaved ? 'Unsave' : 'Save'} ${camera.title}`} aria-pressed={isSaved} onClick={() => toggleSaved(camera)}>{isSaved ? '★' : '☆'}</button>
                       </div>
                       <div className="explorer-camera-meta">
@@ -221,19 +260,20 @@ export default function CameraExplorer({ cameras, feeds, onRefresh, onOpen, onLo
                           <a href={cameraContextUrls(camera.lat, camera.lon).streetView} target="_blank" rel="noopener noreferrer" aria-label={`Open Street View near ${camera.title}`}>Street View ↗</a>
                         </span>
                       </div>
+                      {camera.positionPrecision === 'regional' && <p className="explorer-hint">Directory reference point · not an individual camera position</p>}
                       <div className="explorer-freshness">
                         {camera.captureAt && Number.isFinite(Date.parse(camera.captureAt))
                           ? <span>Captured {new Date(camera.captureAt).toLocaleString()}</span>
                           : <span>Capture time not supplied</span>}
                         {camera.checkedAt && <span className={Date.now() - camera.checkedAt > LISTING_STALE_MS ? 'is-stale' : ''}>
-                          Listing checked {Math.max(0, Math.floor((Date.now() - camera.checkedAt) / 60000))}m ago{Date.now() - camera.checkedAt > LISTING_STALE_MS ? ' · check is old' : ''}
+                          Catalog loaded {Math.max(0, Math.floor((Date.now() - camera.checkedAt) / 60000))}m ago{Date.now() - camera.checkedAt > LISTING_STALE_MS ? ' · catalog is old' : ''}
                         </span>}
                       </div>
                     </li>
                   );
                 })}
               </ul>
-              {results.length > 100 && <p className="explorer-hint">Showing the first 100. Narrow your search for more specific results.</p>}
+              {results.length > visibleCount && <button className="explorer-secondary" onClick={() => setVisibleCount(count => count + 100)}>Show next 100 listings ({results.length - visibleCount} remaining)</button>}
               {!results.length && <p className="explorer-empty">{query ? 'No cameras match your search.' : tab === 'saved' ? 'Your next favorite view is out there. Save a camera with ☆ to keep it here.' : loading ? 'Finding your next view… Sources are still loading.' : 'No cameras match your filters. Try another country or enable more sources.'}</p>}
             </>
           )}

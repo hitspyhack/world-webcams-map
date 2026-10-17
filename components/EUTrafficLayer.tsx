@@ -160,7 +160,7 @@ export default function EUTrafficLayer({ visible, cams: camsProp, onLoad, onCoun
                 )}
                 {imgSrc && imgSrc.startsWith('http') && (
                   <div style={{ marginTop: 6, cursor: onExpand ? 'pointer' : 'default' }}
-                    onClick={() => onExpand?.({ source: 'eu' as never, title: cam.title ?? 'Traffic cam', imageUrl: imgSrc, linkUrl, linkLabel: cfg?.label ?? 'Source' })}>
+                    onClick={() => onExpand?.({ source: 'eu', lat: cam.lat, lon: cam.lon, positionPrecision: 'provider', captureAt: cam.photoTime, title: cam.title ?? 'Traffic cam', imageUrl: imgSrc, linkUrl, linkLabel: cfg?.label ?? 'Source' })}>
                     <img src={imgSrc} alt={cam.title ?? ''}
                       style={{ maxWidth: 250, borderRadius: 6, display: 'block' }}
                       loading="lazy"
@@ -169,7 +169,7 @@ export default function EUTrafficLayer({ visible, cams: camsProp, onLoad, onCoun
                 )}
                 {linkUrl && (
                   <div style={{ marginTop: 5 }}>
-                    <a href={linkUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11 }}>Open stream \u2197</a>
+                    <a href={linkUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11 }}>Open source \u2197</a>
                   </div>
                 )}
                 <div style={{ marginTop: 5, fontSize: 10, fontWeight: 700, color: cfg?.color ?? '#7c3aed' }}>

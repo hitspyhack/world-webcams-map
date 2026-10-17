@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 export const FEEDS = {
+  global: { label: 'Worldwide public operator directory', url: '/api/global-webcams' },
   earthcam: { label: 'EarthCam', url: '/api/earthcam' },
   deckchair: { label: 'Scenic webcams', url: '/api/deckchair' },
   tourism: { label: 'Asia tourism', url: '/api/asia-tourism' },
-  singapore: { label: 'Singapore traffic', url: '/api/asia-traffic/singapore' },
+  singapore: { label: 'Asia traffic · all providers', url: '/api/asia-traffic' },
   eu: { label: 'European traffic', url: '/api/eu-traffic' },
   osm: { label: 'OpenStreetMap', url: '/api/overpass-webcams' },
   skyline: { label: 'Community webcams', url: '/api/skyline-webcams', method: 'POST' },
@@ -61,9 +62,10 @@ export function useWebcamFeeds() {
               : key === 'singapore' && Array.isArray(wrapped?.cameras) ? wrapped.cameras : null;
           if (!data) throw new Error('Provider returned an unexpected response');
           const failedCountries = response.headers?.get('X-Webcam-Failed-Countries');
+          const failedRegions = response.headers?.get('X-Webcam-Failed-Regions');
           setFeeds(previous => ({ ...previous, [key]: {
             data, status: 'ready', updatedAt: Date.now(),
-            warning: failedCountries ? `Some countries could not be loaded: ${failedCountries}` : undefined,
+            warning: failedCountries ? `Some countries could not be loaded: ${failedCountries}` : failedRegions ? `Some regions could not be loaded: ${failedRegions}` : undefined,
           } }));
         } catch (error) {
           if (requests.current.get(key) !== controller || controller.signal.aborted) return;

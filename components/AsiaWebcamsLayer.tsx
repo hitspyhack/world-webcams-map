@@ -82,7 +82,7 @@ export default function AsiaWebcamsLayer({ visible, cams: camsProp, onLoad, onCo
   useEffect(() => {
     if (camsProp !== undefined) return;
     Promise.all([
-      fetch('/api/asia-traffic/singapore').then(r => r.json()).catch(() => []),
+      fetch('/api/asia-traffic').then(r => r.json()).catch(() => []),
       fetch('/api/asia-tourism').then(r => r.json()).catch(() => []),
     ]).then(([sg, tourism]) => {
       const sgArr   = Array.isArray(sg)      ? sg      : (sg?.cameras ?? []);
@@ -130,7 +130,7 @@ export default function AsiaWebcamsLayer({ visible, cams: camsProp, onLoad, onCo
                 </div>
                 {cam.imageUrl && (
                   <div style={{ marginTop: 6, cursor: onExpand ? 'pointer' : 'default' }}
-                    onClick={() => onExpand?.({ source: 'asia' as never, title: cam.title, imageUrl: cam.imageUrl, linkUrl: cam.sourceUrl, linkLabel: cfg?.label ?? 'Source' })}>
+                    onClick={() => onExpand?.({ source: 'asia', lat: cam.lat, lon: cam.lon, positionPrecision: 'provider', title: cam.title, imageUrl: cam.imageUrl, linkUrl: cam.sourceUrl, linkLabel: cfg?.label ?? 'Source' })}>
                     <img src={cam.imageUrl} alt={cam.title}
                       style={{ maxWidth: 250, borderRadius: 5, display: 'block' }}
                       loading="lazy"
