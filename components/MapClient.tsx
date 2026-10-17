@@ -1,12 +1,15 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { useState, useMemo, useCallback, useRef } from 'react';
 import type { GlobeViewHandle } from './GlobeView';
 import type { GlobeCam } from './GlobeView';
-import { ASIA_SOURCES } from './AsiaWebcamsLayer';
-import { EU_COUNTRIES } from './EUTrafficLayer';
+import { ASIA_SOURCES, EU_COUNTRIES } from '../lib/sources';
 import CountrySearch from './CountrySearch';
+import CameraExplorer from './CameraExplorer';
+import CamLightbox, { type CamLightboxEntry } from './CamLightbox';
+import { useWebcamFeeds } from '../hooks/useWebcamFeeds';
+import { hasCoordinates } from '../lib/cameras';
 import type { CountryEntry } from './CountrySearch';
 import type {
   SkylineItem,
@@ -50,8 +53,6 @@ export const SOURCE_COLORS: Record<SourceKey, string> = {
 
 const EU_GLOBE_COLOR   = '#818cf8';
 const ASIA_GLOBE_COLOR = '#fbbf24';
-
-function toArray<T>(val: unknown): T[] { return Array.isArray(val) ? (val as T[]) : []; }
 
 export interface FlyToTarget { lat: number; lon: number; zoom?: number; }
 
@@ -190,24 +191,6 @@ function toCode(raw?: string): string {
   return up;
 }
 
-const SEED_CAMS: GlobeCam[] = [
-  { lat: 48.86,  lon: 2.35,    title: 'Paris — Eiffel Tower',    color: SOURCE_COLORS.earthcam,  source: 'earthcam'  },
-  { lat: 51.50,  lon: -0.13,   title: 'London — Westminster',    color: SOURCE_COLORS.earthcam,  source: 'earthcam'  },
-  { lat: 40.71,  lon: -74.01,  title: 'New York — Times Square', color: SOURCE_COLORS.earthcam,  source: 'earthcam'  },
-  { lat: 35.68,  lon: 139.69,  title: 'Tokyo — Shibuya',         color: SOURCE_COLORS.earthcam,  source: 'earthcam'  },
-  { lat:  1.35,  lon: 103.82,  title: 'Singapore — Marina Bay',  color: SOURCE_COLORS.skyline,   source: 'skyline'   },
-  { lat: -33.87, lon: 151.21,  title: 'Sydney — Harbour Bridge', color: SOURCE_COLORS.earthcam,  source: 'earthcam'  },
-  { lat: 55.75,  lon: 37.62,   title: 'Moscow — Red Square',     color: SOURCE_COLORS.osm,       source: 'osm'       },
-  { lat: 25.20,  lon: 55.27,   title: 'Dubai — Downtown',        color: SOURCE_COLORS.deckchair, source: 'deckchair' },
-  { lat: -23.55, lon: -46.63,  title: 'São Paulo',               color: SOURCE_COLORS.osm,       source: 'osm'       },
-  { lat: 19.43,  lon: -99.13,  title: 'Mexico City',             color: SOURCE_COLORS.osm,       source: 'osm'       },
-  { lat: 28.61,  lon: 77.21,   title: 'New Delhi',               color: SOURCE_COLORS.deckchair, source: 'deckchair' },
-  { lat: -1.29,  lon: 36.82,   title: 'Nairobi',                 color: SOURCE_COLORS.deckchair, source: 'deckchair' },
-  { lat: 37.57,  lon: 126.98,  title: 'Seoul — Gangnam',         color: SOURCE_COLORS.skyline,   source: 'skyline'   },
-  { lat: 41.01,  lon: 28.98,   title: 'Istanbul',                color: SOURCE_COLORS.deckchair, source: 'deckchair' },
-  { lat: 59.33,  lon: 18.07,   title: 'Stockholm',               color: SOURCE_COLORS.osm,       source: 'osm'       },
-];
-
 function camCountry(c: {country?:string;sourceCountry?:string}) {
   return c.sourceCountry ?? c.country ?? '';
 }
@@ -217,7 +200,7 @@ function windyToGlobeCam(c: WindyWebcam): GlobeCam {
   const lon = c.location!.longitude;
   const id = c.id ?? (c as unknown as Record<string,unknown>).webcamId;
   const embedUrl = id ? `https://webcams.windy.com/webcams/${id}/player` : undefined;
-  const imageUrl = c.image?.current?.preview ?? c.image?.sizes?.large?.url;
+  const imageUrl = c.image?.current?.preview ?? c.images?.current?.preview;
   return {
     lat, lon,
     title: c.title ?? 'Windy',
@@ -245,102 +228,22 @@ export default function MapClient() {
     Object.fromEntries(Object.keys(ASIA_SOURCES).map(k => [k, true]))
   );
 
-  const [skylineCams,    setSkylineCams]    = useState<SkylineItem[]>([]);
-  const [earthCams,      setEarthCams]      = useState<EarthCamItem[]>([]);
-  const [osmCams,        setOsmCams]        = useState<OsmWebcam[]>([]);
-  const [deckCams,       setDeckCams]       = useState<DeckchairWebcam[]>([]);
-  const [euCams,         setEuCams]         = useState<TrafficCam[]>([]);
-  const [asiaCams,       setAsiaCams]       = useState<AsiaCam[]>([]);
-  const [windyGlobeCams, setWindyGlobeCams] = useState<WindyWebcam[]>([]);
-  const [loading,        setLoading]        = useState(false);
-  const [errors,         setErrors]         = useState<string[]>([]);
-
-  const [windyMapCount, setWindyMapCount] = useState(0);
-  const [asiaCount,     setAsiaCount]     = useState(0);
-  const [euCount,       setEuCount]       = useState(0);
+  const { feeds, refresh, loading } = useWebcamFeeds();
+  const skylineCams = useMemo(() => feeds.skyline.data.filter(hasCoordinates) as SkylineItem[], [feeds.skyline.data]);
+  const earthCams = useMemo(() => feeds.earthcam.data.filter(hasCoordinates) as EarthCamItem[], [feeds.earthcam.data]);
+  const osmCams = useMemo(() => feeds.osm.data.filter(hasCoordinates) as OsmWebcam[], [feeds.osm.data]);
+  const deckCams = useMemo(() => feeds.deckchair.data.filter(hasCoordinates) as DeckchairWebcam[], [feeds.deckchair.data]);
+  const euCams = useMemo(() => feeds.eu.data.filter(hasCoordinates) as TrafficCam[], [feeds.eu.data]);
+  const asiaCams = useMemo(() => [...feeds.singapore.data, ...feeds.tourism.data].filter(hasCoordinates) as AsiaCam[], [feeds.singapore.data, feeds.tourism.data]);
+  const windyGlobeCams = useMemo(() => (feeds.windy.data as WindyWebcam[]).filter(camera => hasCoordinates({ lat: camera?.location?.latitude, lon: camera?.location?.longitude })), [feeds.windy.data]);
+  const errors = useMemo(() => Object.entries(feeds).flatMap(([key, feed]) => feed.status === 'error' ? [`${key}: ${feed.error}`] : []), [feeds]);
+  const [explorerCamera, setExplorerCamera] = useState<CamLightboxEntry | null>(null);
 
   const [flyTo, setFlyTo] = useState<FlyToTarget | null>(null);
   const [countryFilter, setCountryFilter] = useState<CountryEntry | null>(null);
 
-  const windyMapCountRef = useRef(windyMapCount);
-  const handleWindyCount = useCallback((n: number) => {
-    if (n !== windyMapCountRef.current) { windyMapCountRef.current = n; setWindyMapCount(n); }
-  }, []);
-
-  useEffect(() => {
-    const fetchAll = async () => {
-      setLoading(true); setErrors([]);
-      const errs: string[] = [];
-      const safe = async (label: string, fn: () => Promise<void>) => {
-        try { await fn(); } catch (e: unknown) { errs.push(`${label}: ${e instanceof Error ? e.message : String(e)}`); }
-      };
-      await Promise.all([
-        safe('Skyline', async () => {
-          const r = await fetch('/api/skyline-webcams', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
-          const j = await r.json();
-          if (!r.ok) errs.push(`Skyline: ${j?.error ?? r.statusText}`); else setSkylineCams(toArray(j));
-        }),
-        safe('EarthCam', async () => {
-          const r = await fetch('/api/earthcam');
-          const j = await r.json();
-          if (!r.ok) errs.push(`EarthCam: ${j?.error ?? r.statusText}`); else setEarthCams(toArray(j));
-        }),
-        safe('OSM', async () => {
-          const r = await fetch('/api/overpass-webcams');
-          const j = await r.json();
-          if (!r.ok) errs.push(`OSM: ${j?.error ?? r.statusText}`); else setOsmCams(toArray(j));
-        }),
-        safe('Deckchair', async () => {
-          const r = await fetch('/api/deckchair');
-          const j = await r.json();
-          if (!r.ok) errs.push(`Deckchair: ${j?.error ?? r.statusText}`); else setDeckCams(toArray(j));
-        }),
-        safe('EU', async () => {
-          const countries = Object.keys(EU_COUNTRIES).join(',');
-          const r = await fetch(`/api/eu-traffic?countries=${countries}`);
-          const j = await r.json();
-          if (!r.ok) errs.push(`EU: ${j?.error ?? r.statusText}`);
-          else {
-            const arr = (toArray<TrafficCam>(j)).filter(
-              c => c.lat && c.lon && isFinite(c.lat) && isFinite(c.lon)
-            );
-            setEuCams(arr);
-          }
-        }),
-        safe('Asia', async () => {
-          const [sg, tourism] = await Promise.all([
-            fetch('/api/asia-traffic/singapore').then(r => r.json()).catch(() => []),
-            fetch('/api/asia-tourism').then(r => r.json()).catch(() => []),
-          ]);
-          const sgArr   = toArray<AsiaCam>(Array.isArray(sg) ? sg : (sg?.cameras ?? []));
-          const tourArr = toArray<AsiaCam>(tourism);
-          const all = [...sgArr, ...tourArr].filter(
-            c => c.lat && c.lon && isFinite(c.lat) && isFinite(c.lon) && c.title?.trim()
-          );
-          setAsiaCams(all);
-        }),
-        safe('WindyGlobe', async () => {
-          const bbox = encodeURIComponent('90,180,-90,-180');
-          const r = await fetch(`/api/windy-webcams?bbox=${bbox}&limit=50`);
-          const j = await r.json();
-          // missingKey means no Windy API key configured — skip silently
-          if (j?.missingKey || !r.ok) return;
-          const list: WindyWebcam[] = Array.isArray(j) ? j
-            : Array.isArray(j?.webcams) ? j.webcams : [];
-          setWindyGlobeCams(
-            list.filter(c =>
-              c.location?.latitude != null &&
-              c.location?.longitude != null &&
-              isFinite(c.location.latitude) &&
-              isFinite(c.location.longitude)
-            )
-          );
-        }),
-      ]);
-      setErrors(errs); setLoading(false);
-    };
-    fetchAll();
-  }, []);
+  const handleWindyCount = useCallback(() => {}, []);
+  const handleFlyToDone = useCallback(() => setFlyTo(null), []);
 
   const countryList: CountryEntry[] = useMemo(() => {
     const counts: Record<string, { name: string; lat: number; lon: number; count: number }> = {};
@@ -406,43 +309,47 @@ export default function MapClient() {
       }
     if (visible.skyline)
       for (const c of filteredSkyline)
-        if (c.lat && c.lon)
+        if (hasCoordinates(c))
           cams.push({
             lat: c.lat, lon: c.lon,
             title: c.title ?? 'Skyline',
             color: SOURCE_COLORS.skyline, source: 'skyline',
-            imageUrl: c.thumbnail ?? c.image,
+            imageUrl: c.snapshotUrl,
+            embedUrl: c.snapshotUrl ? undefined : c.url,
             linkUrl: c.url,
           });
     if (visible.earthcam)
       for (const c of filteredEarth)
-        if (c.lat && c.lon)
+        if (hasCoordinates(c))
           cams.push({
             lat: c.lat, lon: c.lon,
             title: c.title ?? 'EarthCam',
             color: SOURCE_COLORS.earthcam, source: 'earthcam',
-            embedUrl: c.embedUrl ?? c.liveUrl,
-            linkUrl: c.url,
+            embedUrl: c.embedUrl,
+            imageUrl: c.imageUrl,
+            linkUrl: c.embedUrl,
           });
     if (visible.osm)
       for (const c of filteredOsm)
-        if (c.lat && c.lon)
+        if (hasCoordinates(c))
           cams.push({
             lat: c.lat, lon: c.lon,
-            title: c.title ?? c.name ?? 'OSM',
+            title: c.title ?? 'OSM',
             color: SOURCE_COLORS.osm, source: 'osm',
-            embedUrl: c.url,
+            embedUrl: c.thumbnailUrl ? undefined : c.webcamUrl,
+            imageUrl: c.thumbnailUrl,
+            linkUrl: c.webcamUrl,
           });
     if (visible.deckchair)
       for (const c of filteredDeck)
-        if (c.lat && c.lon)
+        if (hasCoordinates(c))
           cams.push({
             lat: c.lat, lon: c.lon,
             title: c.title ?? 'Deckchair',
             color: SOURCE_COLORS.deckchair, source: 'deckchair',
             embedUrl: c.embedUrl,
-            imageUrl: c.thumbnail,
-            linkUrl: c.url,
+            imageUrl: c.thumbnailUrl,
+            linkUrl: c.embedUrl,
           });
     for (const c of filteredEu) {
       const key = (c.sourceCountry ?? c.country ?? 'EU') in EU_COUNTRIES ? (c.sourceCountry ?? c.country ?? 'EU') : 'EU';
@@ -451,8 +358,9 @@ export default function MapClient() {
         lat: c.lat, lon: c.lon,
         title: c.title ?? 'EU Traffic',
         color: EU_GLOBE_COLOR, source: 'eu',
-        embedUrl: (c as unknown as Record<string,string>).sourceUrl,
+        embedUrl: (c as unknown as Record<string,string>).imageUrl ? undefined : (c as unknown as Record<string,string>).sourceUrl,
         imageUrl: (c as unknown as Record<string,string>).imageUrl,
+        linkUrl: (c as unknown as Record<string,string>).sourceUrl,
       });
     }
     for (const c of filteredAsia) {
@@ -462,21 +370,25 @@ export default function MapClient() {
         lat: c.lat, lon: c.lon,
         title: c.title ?? 'Asia cam',
         color: ASIA_GLOBE_COLOR, source: 'asia',
-        embedUrl: (c as unknown as Record<string,string>).sourceUrl,
+        embedUrl: (c as unknown as Record<string,string>).imageUrl ? undefined : (c as unknown as Record<string,string>).sourceUrl,
         imageUrl: (c as unknown as Record<string,string>).imageUrl,
+        linkUrl: (c as unknown as Record<string,string>).sourceUrl,
       });
     }
-    return cams.length > 0 ? cams : SEED_CAMS.filter(c => visible[c.source as SourceKey] !== false);
+    return cams;
   }, [windyGlobeCams, filteredSkyline, filteredEarth, filteredOsm, filteredDeck, filteredEu, filteredAsia, visible, euVisible, asiaVisible, countryFilter, matchCountry]);
 
   const handleGlobeCamClick = useCallback((cam: GlobeCam) => {
-    if (!cam.embedUrl && !cam.imageUrl) {
-      setFlyTo({ lat: cam.lat, lon: cam.lon, zoom: 13 });
-      setMode('map');
-    }
+    setCountryFilter(null);
+    setFlyTo({ lat: cam.lat, lon: cam.lon, zoom: 13 });
+    setMode('map');
   }, []);
 
-  const grandTotal = windyMapCount + filteredSkyline.length + filteredEarth.length + filteredOsm.length + filteredDeck.length + asiaCount + euCount;
+  const openExplorerCamera = useCallback((camera: GlobeCam) => {
+    globeRef.current?.rotateTo(camera.lon, camera.lat);
+    setExplorerCamera({ source: camera.source ?? 'webcam', title: camera.title, imageUrl: camera.imageUrl, embedUrl: camera.embedUrl, linkUrl: camera.linkUrl });
+  }, []);
+  const grandTotal = globeCams.length;
 
   return (
     <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden' }}>
@@ -485,12 +397,14 @@ export default function MapClient() {
       <div style={{
         position: 'absolute', inset: 0,
         opacity: mode === 'globe' ? 1 : 0,
+        visibility: mode === 'globe' ? 'visible' : 'hidden',
         pointerEvents: mode === 'globe' ? 'auto' : 'none',
         transition: 'opacity 0.45s ease',
         zIndex: mode === 'globe' ? 2 : 1,
       }}>
         <GlobeView
           ref={globeRef}
+          active={mode === 'globe'}
           cams={globeCams}
           totalCount={grandTotal}
           loading={loading}
@@ -510,10 +424,11 @@ export default function MapClient() {
         />
       </div>
 
-      {/* Leaflet map */}
-      <div style={{
+      {/* Only mount the map when visible; it has its own viewport requests. */}
+      {mode === 'map' && <div style={{
         position: 'absolute', inset: 0,
         opacity: mode === 'map' ? 1 : 0,
+        visibility: mode === 'map' ? 'visible' : 'hidden',
         pointerEvents: mode === 'map' ? 'auto' : 'none',
         transition: 'opacity 0.45s ease',
         zIndex: mode === 'map' ? 2 : 1,
@@ -531,18 +446,21 @@ export default function MapClient() {
           loading={loading}
           errors={errors}
           onWindyCount={handleWindyCount}
-          onAsiaCount={setAsiaCount}
-          onEuCount={setEuCount}
+          onAsiaCount={handleWindyCount}
+          onEuCount={handleWindyCount}
           onToggleSource={(k) => setVisible(v => ({ ...v, [k]: !v[k as SourceKey] }))}
           onToggleEu={(k)   => setEuVisible(v => ({ ...v, [k]: !v[k] }))}
           onToggleAsia={(k) => setAsiaVisible(v => ({ ...v, [k]: !v[k] }))}
           flyTo={flyTo}
-          onFlyToDone={() => setFlyTo(null)}
+          onFlyToDone={handleFlyToDone}
           countryFilter={countryFilter}
           onClearFilter={() => handleCountrySelect(null)}
           windyForceBbox={windyForceBbox}
         />
-      </div>
+      </div>}
+
+      <CameraExplorer cameras={globeCams} feeds={feeds} onRefresh={refresh} onOpen={openExplorerCamera} onLocate={handleGlobeCamClick} />
+      <CamLightbox entry={explorerCamera} onClose={() => setExplorerCamera(null)} />
 
       {/* Mode toggle */}
       <button

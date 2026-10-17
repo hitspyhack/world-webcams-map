@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import L from 'leaflet';
+import type L from 'leaflet';
+import { createCameraIcon } from '../lib/mapIcons';
+import { hasCoordinates } from '../lib/cameras';
 import { Marker, Popup } from 'react-leaflet';
 import type { CamLightboxEntry } from './CamLightbox';
 
@@ -17,39 +19,23 @@ interface AsiaCam {
   sourceCountry?: string;
 }
 
-export const ASIA_SOURCES: Record<string, string> = {
-  SG: 'Singapore',
-  JP: 'Japan',
-  KR: 'Korea',
-  HK: 'Hong Kong',
-  TH: 'Thailand',
-  AE: 'UAE',
-  TW: 'Taiwan',
-  MY: 'Malaysia',
-  ID: 'Indonesia',
-  VN: 'Vietnam',
-  PH: 'Philippines',
-  IN: 'India',
-  CN: 'China',
-};
+export { ASIA_SOURCES } from '../lib/sources';
 
-const ASIA_CONFIG: Record<string, { label: string; flag: string; color: string; markerUrl: string }> = {
-  SG: { label: 'Singapore',   flag: '\ud83c\uddf8\ud83c\uddec', color: '#ef4444', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png' },
-  JP: { label: 'Japan',       flag: '\ud83c\uddef\ud83c\uddf5', color: '#2563eb', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png' },
-  KR: { label: 'Korea',       flag: '\ud83c\uddf0\ud83c\uddf7', color: '#16a34a', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png' },
-  HK: { label: 'Hong Kong',   flag: '\ud83c\udded\ud83c\uddf0', color: '#f97316', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-orange.png' },
-  TH: { label: 'Thailand',    flag: '\ud83c\uddf9\ud83c\udded', color: '#e11d48', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png' },
-  AE: { label: 'UAE',         flag: '\ud83c\udde6\ud83c\uddea', color: '#0ea5e9', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png' },
-  TW: { label: 'Taiwan',      flag: '\ud83c\uddf9\ud83c\uddfc', color: '#7c3aed', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-violet.png' },
-  MY: { label: 'Malaysia',    flag: '\ud83c\uddf2\ud83c\uddfe', color: '#ca8a04', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-gold.png' },
-  ID: { label: 'Indonesia',   flag: '\ud83c\uddee\ud83c\udde9', color: '#dc2626', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png' },
-  VN: { label: 'Vietnam',     flag: '\ud83c\uddfb\ud83c\uddf3', color: '#15803d', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png' },
-  PH: { label: 'Philippines', flag: '\ud83c\uddf5\ud83c\udded', color: '#1d4ed8', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png' },
-  IN: { label: 'India',       flag: '\ud83c\uddee\ud83c\uddf3', color: '#ea580c', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-orange.png' },
-  CN: { label: 'China',       flag: '\ud83c\udde8\ud83c\uddf3', color: '#be123c', markerUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png' },
+const ASIA_CONFIG: Record<string, { label: string; flag: string; color: string }> = {
+  SG: { label: 'Singapore',   flag: '\ud83c\uddf8\ud83c\uddec', color: '#ef4444' },
+  JP: { label: 'Japan',       flag: '\ud83c\uddef\ud83c\uddf5', color: '#2563eb' },
+  KR: { label: 'Korea',       flag: '\ud83c\uddf0\ud83c\uddf7', color: '#16a34a' },
+  HK: { label: 'Hong Kong',   flag: '\ud83c\udded\ud83c\uddf0', color: '#f97316' },
+  TH: { label: 'Thailand',    flag: '\ud83c\uddf9\ud83c\udded', color: '#e11d48' },
+  AE: { label: 'UAE',         flag: '\ud83c\udde6\ud83c\uddea', color: '#0ea5e9' },
+  TW: { label: 'Taiwan',      flag: '\ud83c\uddf9\ud83c\uddfc', color: '#7c3aed' },
+  MY: { label: 'Malaysia',    flag: '\ud83c\uddf2\ud83c\uddfe', color: '#ca8a04' },
+  ID: { label: 'Indonesia',   flag: '\ud83c\uddee\ud83c\udde9', color: '#dc2626' },
+  VN: { label: 'Vietnam',     flag: '\ud83c\uddfb\ud83c\uddf3', color: '#15803d' },
+  PH: { label: 'Philippines', flag: '\ud83c\uddf5\ud83c\udded', color: '#1d4ed8' },
+  IN: { label: 'India',       flag: '\ud83c\uddee\ud83c\uddf3', color: '#ea580c' },
+  CN: { label: 'China',       flag: '\ud83c\udde8\ud83c\uddf3', color: '#be123c' },
 };
-
-const SHADOW = 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png';
 
 // Lazy-init: only called in the browser, never at module-eval time on the server.
 let _icons: Record<string, L.Icon> | null = null;
@@ -60,7 +46,7 @@ function getIcons(): Record<string, L.Icon> {
     _icons = Object.fromEntries(
       Object.entries(ASIA_CONFIG).map(([k, v]) => [
         k,
-        new L.Icon({ iconUrl: v.markerUrl, iconRetinaUrl: v.markerUrl.replace('.png', '-2x.png'), shadowUrl: SHADOW, iconSize: [20, 33], iconAnchor: [10, 33], popupAnchor: [1, -28], shadowSize: [33, 33] }),
+        createCameraIcon(v.color, true),
       ])
     );
   }
@@ -69,13 +55,13 @@ function getIcons(): Record<string, L.Icon> {
 
 function getDefaultIcon(): L.Icon {
   if (!_defaultIcon) {
-    _defaultIcon = new L.Icon({ iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png', iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png', shadowUrl: SHADOW, iconSize: [20, 33], iconAnchor: [10, 33], popupAnchor: [1, -28], shadowSize: [33, 33] });
+    _defaultIcon = createCameraIcon('#79c0ff', true);
   }
   return _defaultIcon;
 }
 
 function isPopulated(cam: AsiaCam): boolean {
-  if (!cam.lat || !cam.lon || !isFinite(cam.lat) || !isFinite(cam.lon)) return false;
+  if (!hasCoordinates(cam)) return false;
   if (!cam.title?.trim()) return false;
   return !!(cam.imageUrl || cam.sourceUrl);
 }

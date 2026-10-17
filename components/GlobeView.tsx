@@ -1,22 +1,17 @@
 'use client';
 
 import { useEffect, useRef, useCallback, useState, useImperativeHandle, forwardRef } from 'react';
-import { ASIA_SOURCES } from './AsiaWebcamsLayer';
-import { EU_COUNTRIES } from './EUTrafficLayer';
+import { ASIA_SOURCES, EU_COUNTRIES } from '../lib/sources';
+import { geoOrthographic, geoPath, geoGraticule } from 'd3-geo';
+import { feature } from 'topojson-client';
+import type { Topology, GeometryCollection } from 'topojson-specification';
+import world from 'world-atlas/countries-110m.json';
+import { isOnVisibleHemisphere } from '../lib/globe';
 import CamLightbox from './CamLightbox';
 import type { CamLightboxEntry } from './CamLightbox';
 import CountrySearch from './CountrySearch';
 import type { CountryEntry } from './CountrySearch';
 import type { SourceKey } from './MapClient';
-
-declare global {
-  interface Window {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    d3: any;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    topojson: any;
-  }
-}
 
 export interface GlobeCam {
   lat: number;
@@ -36,6 +31,7 @@ export interface GlobeViewHandle {
 
 interface Props {
   cams: GlobeCam[];
+  active?: boolean;
   totalCount?: number;
   loading?: boolean;
   errors?: string[];
@@ -63,23 +59,10 @@ const HOVER_RADIUS = 6;
 const FPS_CAP      = 40;
 const FRAME_MS     = 1000 / FPS_CAP;
 
-const TOPO_URL = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json';
-const D3_CDN   = 'https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js';
-const TOPO_CDN = 'https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js';
-
-function loadScript(src: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
-    const s = Object.assign(document.createElement('script'), {
-      src, onload: resolve,
-      onerror: () => reject(new Error(`Script load failed: ${src}`)),
-    });
-    document.head.appendChild(s);
-  });
-}
+const COUNTRIES = feature(world as unknown as Topology, world.objects.countries as GeometryCollection);
 
 const SOURCE_LABELS: Record<SourceKey, string> = {
-  windy: 'Windy', skyline: 'Skyline', earthcam: 'EarthCam', osm: 'OSM', deckchair: 'Deckchair',
+  windy: 'Windy', skyline: 'Community', earthcam: 'EarthCam', osm: 'OSM', deckchair: 'Deckchair',
 };
 
 const SOURCE_BADGE_COLORS: Record<string, string> = {
@@ -196,7 +179,7 @@ function CamDrawer({
 // Component — wrapped in forwardRef to expose rotateTo to the parent
 // ---------------------------------------------------------------------------
 const GlobeView = forwardRef<GlobeViewHandle, Props>(function GlobeView({
-  cams, totalCount, loading, errors = [],
+  cams, active = true, totalCount, loading, errors = [],
   visible, euVisible, asiaVisible,
   onToggleSource, onToggleEu, onToggleAsia,
   onEnterMap, onCamClick,
@@ -209,14 +192,23 @@ const GlobeView = forwardRef<GlobeViewHandle, Props>(function GlobeView({
   const rotRef       = useRef<[number, number, number]>([0, TILT, 0]);
   const dragRef      = useRef<{ active: boolean; x: number; y: number }>({ active: false, x: 0, y: 0 });
   const pauseRef     = useRef(false);
+  const gestureMovedRef = useRef(false);
+  const gestureStartRef = useRef<{ x: number; y: number } | null>(null);
   const lastFrameRef = useRef(0);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const topoRef      = useRef<any>(null);
-  const readyRef     = useRef(false);
   const projRef      = useRef<((c: [number, number]) => [number, number] | null) | null>(null);
   const hoveredRef   = useRef<GlobeCam | null>(null);
   const tooltipRef   = useRef<HTMLDivElement | null>(null);
   const lastTouchRef = useRef<{ x: number; y: number } | null>(null);
+
+  const [spinning, setSpinning] = useState(true);
+
+  useEffect(() => {
+    const preference = window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (preference.matches) setSpinning(false);
+    const changed = () => { if (preference.matches) setSpinning(false); };
+    preference.addEventListener('change', changed);
+    return () => preference.removeEventListener('change', changed);
+  }, []);
 
   const [legendOpen,    setLegendOpen]    = useState(false);
   const [legendSection, setLegendSection] = useState<'global' | 'eu' | 'asia'>('global');
@@ -226,6 +218,7 @@ const GlobeView = forwardRef<GlobeViewHandle, Props>(function GlobeView({
   // Expose rotateTo so MapClient can pan the globe on country search
   const rotateTo = useCallback((lon: number, lat: number) => {
     rotRef.current = [-lon, -lat, 0];
+    setSpinning(false);
   }, []);
 
   useImperativeHandle(ref, () => ({ rotateTo }), [rotateTo]);
@@ -233,7 +226,8 @@ const GlobeView = forwardRef<GlobeViewHandle, Props>(function GlobeView({
   // ── Draw one frame ───────────────────────────────────────────────────────
   const draw = useCallback((now: number) => {
     const canvas = canvasRef.current;
-    if (!canvas || !readyRef.current) { rafRef.current = requestAnimationFrame(draw); return; }
+    if (!canvas) return;
+    if (document.hidden) { rafRef.current = requestAnimationFrame(draw); return; }
     if (now - lastFrameRef.current < FRAME_MS) { rafRef.current = requestAnimationFrame(draw); return; }
     lastFrameRef.current = now;
 
@@ -243,18 +237,17 @@ const GlobeView = forwardRef<GlobeViewHandle, Props>(function GlobeView({
     const cx = W / 2, cy = H / 2;
     const radius = Math.min(W, H) * 0.42;
 
-    if (!pauseRef.current && !dragRef.current.active)
-      rotRef.current = [rotRef.current[0] + SPIN_SPEED, TILT, 0];
+    if (spinning && !pauseRef.current && !dragRef.current.active)
+      rotRef.current = [rotRef.current[0] + SPIN_SPEED, rotRef.current[1], 0];
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const d3 = window.d3 as any;
-    const proj = d3.geoOrthographic()
+    const proj = geoOrthographic()
       .scale(radius).translate([cx, cy]).rotate(rotRef.current)
       .clipAngle(90).precision(0.5);
     projRef.current = proj;
 
-    const ctx = canvas.getContext('2d')!;
-    const pathGen = d3.geoPath().projection(proj).context(ctx);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const pathGen = geoPath().projection(proj).context(ctx);
     ctx.clearRect(0, 0, W, H);
 
     // Ocean
@@ -265,13 +258,13 @@ const GlobeView = forwardRef<GlobeViewHandle, Props>(function GlobeView({
     ctx.fillStyle = ocean; ctx.fill(); ctx.restore();
 
     // Graticule
-    ctx.save(); ctx.beginPath(); pathGen(d3.geoGraticule()());
+    ctx.save(); ctx.beginPath(); pathGen(geoGraticule()());
     ctx.strokeStyle = 'rgba(30,80,60,0.45)'; ctx.lineWidth = 0.4; ctx.stroke(); ctx.restore();
 
     // Land
-    if (topoRef.current) {
+    if (COUNTRIES) {
       ctx.save();
-      ctx.beginPath(); pathGen(topoRef.current);
+      ctx.beginPath(); pathGen(COUNTRIES);
       ctx.fillStyle   = '#2d7a48';
       ctx.strokeStyle = '#52c47a';
       ctx.lineWidth   = 0.7;
@@ -287,6 +280,7 @@ const GlobeView = forwardRef<GlobeViewHandle, Props>(function GlobeView({
     // Cam dots
     const hov = hoveredRef.current;
     for (const cam of cams) {
+      if (!isOnVisibleHemisphere(cam.lon, cam.lat, rotRef.current)) continue;
       const pt = proj([cam.lon, cam.lat]);
       if (!pt) continue;
       const [px, py] = pt as [number, number];
@@ -311,24 +305,14 @@ const GlobeView = forwardRef<GlobeViewHandle, Props>(function GlobeView({
     ctx.fillStyle = atm; ctx.fill(); ctx.restore();
 
     rafRef.current = requestAnimationFrame(draw);
-  }, [cams]);
+  }, [cams, spinning]);
 
   const startLoop = useCallback(() => { cancelAnimationFrame(rafRef.current); rafRef.current = requestAnimationFrame(draw); }, [draw]);
 
   useEffect(() => {
-    let cancelled = false;
-    Promise.all([loadScript(D3_CDN), loadScript(TOPO_CDN), fetch(TOPO_URL).then(r => r.json())])
-      .then(([,, world]) => {
-        if (cancelled) return;
-        topoRef.current = window.topojson.feature(world, world.objects.countries);
-        readyRef.current = true;
-        setTimeout(startLoop, 0);
-      }).catch(console.error);
-    return () => { cancelled = true; cancelAnimationFrame(rafRef.current); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => { if (readyRef.current) startLoop(); }, [cams, startLoop]);
+    if (active) startLoop();
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [active, startLoop]);
 
   // Resize
   useEffect(() => {
@@ -353,6 +337,7 @@ const GlobeView = forwardRef<GlobeViewHandle, Props>(function GlobeView({
     const radius = Math.min(canvas.width, canvas.height) * 0.42;
     let best: GlobeCam | null = null, bestDist = HOVER_RADIUS * 3;
     for (const cam of cams) {
+      if (!isOnVisibleHemisphere(cam.lon, cam.lat, rotRef.current)) continue;
       const pt = proj([cam.lon, cam.lat]); if (!pt) continue;
       const [px, py] = pt as [number, number];
       if ((px - cx) ** 2 + (py - cy) ** 2 > radius * radius * 1.01) continue;
@@ -364,6 +349,8 @@ const GlobeView = forwardRef<GlobeViewHandle, Props>(function GlobeView({
 
   const onMouseMove = useCallback((e: React.MouseEvent) => {
     if (dragRef.current.active) {
+      const start = gestureStartRef.current;
+      if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 5) gestureMovedRef.current = true;
       const dx = e.clientX - dragRef.current.x, dy = e.clientY - dragRef.current.y;
       rotRef.current = [
         rotRef.current[0] + dx * 0.5,
@@ -388,7 +375,7 @@ const GlobeView = forwardRef<GlobeViewHandle, Props>(function GlobeView({
     if (canvas) canvas.style.cursor = cam ? 'pointer' : (dragRef.current.active ? 'grabbing' : 'grab');
   }, [getCamAt]);
 
-  const onMouseDown  = useCallback((e: React.MouseEvent) => { pauseRef.current = true; dragRef.current = { active: true, x: e.clientX, y: e.clientY }; }, []);
+  const onMouseDown  = useCallback((e: React.MouseEvent) => { pauseRef.current = true; gestureMovedRef.current = false; gestureStartRef.current = { x: e.clientX, y: e.clientY }; dragRef.current = { active: true, x: e.clientX, y: e.clientY }; }, []);
   const onMouseUp    = useCallback(() => { dragRef.current.active = false; pauseRef.current = false; }, []);
   const onMouseLeave = useCallback(() => {
     dragRef.current.active = false; pauseRef.current = false; hoveredRef.current = null;
@@ -396,9 +383,11 @@ const GlobeView = forwardRef<GlobeViewHandle, Props>(function GlobeView({
   }, []);
 
   const onClick = useCallback((e: React.MouseEvent) => {
+    if (gestureMovedRef.current) { gestureMovedRef.current = false; return; }
     const cam = getCamAt(e.clientX, e.clientY);
     if (!cam) return;
     setDrawerCam(cam);
+    setSpinning(false);
   }, [getCamAt]);
 
   const handleDrawerExpand    = useCallback((entry: CamLightboxEntry) => { setLightboxEntry(entry); }, []);
@@ -407,9 +396,11 @@ const GlobeView = forwardRef<GlobeViewHandle, Props>(function GlobeView({
     if (onCamClick) onCamClick(cam); else onEnterMap();
   }, [onCamClick, onEnterMap]);
 
-  const onTouchStart = useCallback((e: React.TouchEvent) => { pauseRef.current = true; const t = e.touches[0]; lastTouchRef.current = { x: t.clientX, y: t.clientY }; }, []);
+  const onTouchStart = useCallback((e: React.TouchEvent) => { pauseRef.current = true; const t = e.touches[0]; gestureMovedRef.current = false; gestureStartRef.current = { x: t.clientX, y: t.clientY }; lastTouchRef.current = { x: t.clientX, y: t.clientY }; }, []);
   const onTouchMove  = useCallback((e: React.TouchEvent) => {
     const t = e.touches[0]; const prev = lastTouchRef.current; if (!prev) return;
+    const start = gestureStartRef.current;
+    if (start && Math.hypot(t.clientX - start.x, t.clientY - start.y) > 5) gestureMovedRef.current = true;
     rotRef.current = [
       rotRef.current[0] + (t.clientX - prev.x) * 0.5,
       Math.max(-60, Math.min(60, rotRef.current[1] - (t.clientY - prev.y) * 0.5)), 0,
@@ -436,21 +427,27 @@ const GlobeView = forwardRef<GlobeViewHandle, Props>(function GlobeView({
 
       <canvas
         ref={canvasRef}
-        style={{ display: 'block', width: '100%', height: '100%', cursor: 'grab' }}
+        aria-label="Interactive webcam globe. Use Explore cameras for a keyboard-accessible list."
+        role="img"
+        style={{ display: 'block', width: '100%', height: '100%', cursor: 'grab', touchAction: 'none' }}
         onMouseMove={onMouseMove} onMouseDown={onMouseDown} onMouseUp={onMouseUp}
         onMouseLeave={onMouseLeave} onClick={onClick}
         onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
       />
 
+      <button className="globe-spin-toggle" aria-pressed={!spinning} onClick={() => setSpinning(value => !value)}>
+        {spinning ? 'Ⅱ Pause rotation' : '▷ Resume rotation'}
+      </button>
+
       {/* HUD */}
       <div style={{
-        position: 'absolute', top: 20, left: '50%', transform: 'translateX(-50%)',
+        position: 'absolute', top: 70, left: '50%', transform: 'translateX(-50%)',
         zIndex: 10, textAlign: 'center', pointerEvents: 'none',
         fontFamily: 'monospace', letterSpacing: '0.2em',
       }}>
-        <div style={{ fontSize: 13, color: 'rgba(0,220,120,0.9)', textTransform: 'uppercase' }}>◉ LIVE SURVEILLANCE NETWORK</div>
+        <div style={{ fontSize: 13, color: 'rgba(0,220,120,0.9)', textTransform: 'uppercase' }}>◉ WORLD WEBCAMS</div>
         <div style={{ fontSize: 10, color: 'rgba(0,180,80,0.5)', marginTop: 3 }}>
-          {loading ? 'LOADING…' : `${displayCount.toLocaleString()} CAMERAS ONLINE`}
+          {loading ? 'LOADING…' : `${displayCount.toLocaleString()} CAMERAS LISTED`}
         </div>
         {errors.length > 0 && (
           <div style={{ fontSize: 9, color: 'rgba(255,100,80,0.6)', marginTop: 2 }}>
@@ -460,19 +457,7 @@ const GlobeView = forwardRef<GlobeViewHandle, Props>(function GlobeView({
       </div>
 
       {/* Country Search Bar */}
-      {countries.length > 0 && (
-        <div style={{
-          position: 'absolute', top: 14, left: '50%',
-          transform: 'translateX(-50%)', marginLeft: 48,
-          zIndex: 30, width: 320, maxWidth: 'calc(100vw - 180px)',
-        }}>
-          <CountrySearch
-            countries={countries}
-            selected={countryFilter ?? null}
-            onSelect={onSearchSelect ?? (() => {})}
-          />
-        </div>
-      )}
+      <CountrySearch countries={countries} selected={countryFilter ?? null} onSelect={onSearchSelect ?? (() => {})} />
 
       {/* Active filter badge — only when search dropdown not shown */}
       {countryFilter && countries.length === 0 && (

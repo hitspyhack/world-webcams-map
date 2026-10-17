@@ -1,7 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import L from 'leaflet';
+import type L from 'leaflet';
+import { createCameraIcon } from '../lib/mapIcons';
+import { hasCoordinates } from '../lib/cameras';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import AsiaWebcamsLayer, { ASIA_SOURCES } from './AsiaWebcamsLayer';
 import EUTrafficLayer,   { EU_COUNTRIES }  from './EUTrafficLayer';
@@ -30,26 +32,13 @@ interface AsiaCam {
   imageUrl?: string; sourceUrl?: string;
 }
 
-const SOURCE_CONFIG: Record<SourceKey, { label: string; color: string; markerUrl: string }> = {
-  windy:     { label: 'Windy',     color: '#60a5fa', markerUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png' },
-  skyline:   { label: 'Skyline',   color: '#f87171', markerUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png' },
-  earthcam:  { label: 'EarthCam',  color: '#fb923c', markerUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png' },
-  osm:       { label: 'OSM',       color: '#4ade80', markerUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png' },
-  deckchair: { label: 'Deckchair', color: '#c084fc', markerUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png' },
+const SOURCE_CONFIG: Record<SourceKey, { label: string; color: string }> = {
+  windy:     { label: 'Windy',     color: '#60a5fa' },
+  skyline:   { label: 'Community',   color: '#f87171' },
+  earthcam:  { label: 'EarthCam',  color: '#fb923c' },
+  osm:       { label: 'OSM',       color: '#4ade80' },
+  deckchair: { label: 'Deckchair', color: '#c084fc' },
 };
-
-const SHADOW_URL = 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png';
-
-function makeColorIcon(color: string, markerUrl: string) {
-  return new L.Icon({
-    iconUrl: markerUrl,
-    iconRetinaUrl: markerUrl.replace('.png', '-2x.png'),
-    shadowUrl: SHADOW_URL,
-    iconSize: [25, 41], iconAnchor: [12, 41],
-    popupAnchor: [1, -34], shadowSize: [41, 41],
-    className: `leaflet-marker-${color.replace('#', '')}`,
-  });
-}
 
 // ── FlyTo controller ─────────────────────────────────────────────────────────
 function FlyToController({ target, onDone }: { target: FlyToTarget | null; onDone: () => void }) {
@@ -58,8 +47,9 @@ function FlyToController({ target, onDone }: { target: FlyToTarget | null; onDon
   useEffect(() => {
     if (!target || target === prev.current) return;
     prev.current = target;
-    map.flyTo([target.lat, target.lon], target.zoom ?? 10, { duration: 1.2 });
-    const id = setTimeout(onDone, 1400);
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    map.flyTo([target.lat, target.lon], target.zoom ?? 10, { duration: reduceMotion ? 0 : 1.2, animate: !reduceMotion });
+    const id = setTimeout(onDone, reduceMotion ? 0 : 1400);
     return () => clearTimeout(id);
   }, [target, map, onDone]);
   return null;
@@ -88,13 +78,18 @@ function Legend({
   // Start collapsed — user expands on demand
   const [open, setOpen] = useState(false);
 
-  const totalCount = Object.values(counts).reduce<number>((s, v) => s + (v ?? 0), 0);
+  const totalCount = Object.entries(counts).reduce((sum, [key, count]) => {
+    const enabled = key.startsWith('eu_') ? euVisible[key.slice(3)] !== false
+      : key.startsWith('asia_') ? asiaVisible[key.slice(5)] !== false : visible[key as SourceKey];
+    return sum + (enabled ? count ?? 0 : 0);
+  }, 0);
 
   return (
     <div style={{
       position: 'absolute', top: 12, right: 12, zIndex: 1000,
       background: 'rgba(4,8,16,0.88)', color: '#e6edf3',
       borderRadius: 10, padding: open ? '12px 14px' : '8px 14px',
+      maxHeight: 'calc(100dvh - 90px)', overflowY: 'auto',
       minWidth: 190, fontSize: 12, fontFamily: 'system-ui',
       border: '1px solid rgba(255,255,255,0.1)',
       backdropFilter: 'blur(8px)',
@@ -103,9 +98,9 @@ function Legend({
     }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
         <span style={{ fontWeight: 700, fontSize: 11, letterSpacing: '0.06em', color: 'rgba(0,220,100,0.85)' }}>
-          LIVE CAMS {loading ? '⟳' : `(${totalCount.toLocaleString()})`}
+          LISTED CAMS {loading ? '⟳' : `(${totalCount.toLocaleString()})`}
         </span>
-        <button onClick={() => setOpen(o => !o)}
+        <button aria-label="Toggle source layers" aria-expanded={open} onClick={() => setOpen(o => !o)}
           style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: 0 }}>
           {open ? '▴' : '▾'}
         </button>
@@ -222,7 +217,7 @@ function MapInner({
   const icons = useMemo(() => {
     const result = {} as Record<SourceKey, L.Icon>;
     for (const [key, cfg] of Object.entries(SOURCE_CONFIG) as [SourceKey, typeof SOURCE_CONFIG[SourceKey]][]) {
-      result[key] = makeColorIcon(cfg.color, cfg.markerUrl);
+      result[key] = createCameraIcon(cfg.color);
     }
     return result;
   }, []);
@@ -250,11 +245,11 @@ function MapInner({
     earthcam:  earthCams.length,
     osm:       osmCams.length,
     deckchair: deckCams.length,
-    ...Object.fromEntries(euCams.map(c => [`eu_${c.sourceCountry ?? c.country ?? 'EU'}`, 1]).reduce(
+    ...Object.fromEntries(euCams.map<[string, number]>(c => [`eu_${c.sourceCountry ?? c.country ?? 'EU'}`, 1]).reduce(
       (acc: Map<string, number>, [k, v]: [string, number]) => { acc.set(k, (acc.get(k) ?? 0) + v); return acc; },
       new Map<string, number>()
     )),
-    ...Object.fromEntries(asiaCams.map(c => [`asia_${c.sourceCountry ?? c.country ?? 'SG'}`, 1]).reduce(
+    ...Object.fromEntries(asiaCams.map<[string, number]>(c => [`asia_${c.sourceCountry ?? c.country ?? 'SG'}`, 1]).reduce(
       (acc: Map<string, number>, [k, v]: [string, number]) => { acc.set(k, (acc.get(k) ?? 0) + v); return acc; },
       new Map<string, number>()
     )),
@@ -282,7 +277,7 @@ function MapInner({
 
       {/* ── Skyline ────────────────────────────────────────────────────────── */}
       {visible.skyline && skylineCams.map(cam => {
-        if (!cam.lat || !cam.lon || !isFinite(cam.lat) || !isFinite(cam.lon)) return null;
+        if (!hasCoordinates(cam)) return null;
         return (
           <Marker key={`sky-${cam.id}`} position={[cam.lat, cam.lon]} icon={icons.skyline}>
             <Popup maxWidth={270}>
@@ -291,14 +286,14 @@ function MapInner({
                 <div style={{ fontSize: 11, color: '#8b949e', marginTop: 2 }}>{[cam.city, cam.country].filter(Boolean).join(', ')}</div>
                 {cam.snapshotUrl && (
                   <div style={{ marginTop: 7, cursor: 'pointer' }}
-                    onClick={() => setLightbox({ source: 'skyline', title: cam.title, imageUrl: cam.snapshotUrl, linkUrl: cam.url, linkLabel: 'Open on Skyline' })}>
+                    onClick={() => setLightbox({ source: 'skyline', title: cam.title, imageUrl: cam.snapshotUrl, linkUrl: cam.url, linkLabel: 'Open webcam source' })}>
                     <img src={cam.snapshotUrl} alt={cam.title}
                       style={{ maxWidth: 248, width: '100%', borderRadius: 6, display: 'block', background: '#0d1117' }}
                       loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                   </div>
                 )}
-                {cam.url && <div style={{ marginTop: 5 }}><a href={cam.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11 }}>Open on Skyline ↗</a></div>}
-                <div style={{ marginTop: 4, fontSize: 10, color: '#f87171', fontWeight: 700, letterSpacing: '0.04em' }}>SOURCE: SKYLINE</div>
+                {cam.url && <div style={{ marginTop: 5 }}><a href={cam.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11 }}>Open webcam source ↗</a></div>}
+                <div style={{ marginTop: 4, fontSize: 10, color: '#f87171', fontWeight: 700, letterSpacing: '0.04em' }}>SOURCE: COMMUNITY</div>
               </div>
             </Popup>
           </Marker>
@@ -307,7 +302,7 @@ function MapInner({
 
       {/* ── EarthCam ───────────────────────────────────────────────────────── */}
       {visible.earthcam && earthCams.map(cam => {
-        if (!cam.lat || !cam.lon || !isFinite(cam.lat) || !isFinite(cam.lon)) return null;
+        if (!hasCoordinates(cam)) return null;
         return (
           <Marker key={`earth-${cam.id}`} position={[cam.lat, cam.lon]} icon={icons.earthcam}>
             <Popup maxWidth={270}>
@@ -316,7 +311,7 @@ function MapInner({
                 <div style={{ fontSize: 11, color: '#8b949e', marginTop: 2 }}>{[cam.city, cam.country].filter(Boolean).join(', ')}</div>
                 {cam.imageUrl && (
                   <div style={{ marginTop: 7, cursor: 'pointer' }}
-                    onClick={() => setLightbox({ source: 'earthcam', title: cam.title, embedUrl: cam.embedUrl, imageUrl: cam.imageUrl, linkLabel: 'EarthCam' })}>
+                    onClick={() => setLightbox({ source: 'earthcam', title: cam.title, embedUrl: cam.embedUrl, imageUrl: cam.imageUrl, linkUrl: cam.embedUrl, linkLabel: 'EarthCam' })}>
                     <img src={cam.imageUrl} alt={cam.title}
                       style={{ maxWidth: 248, width: '100%', borderRadius: 6, display: 'block', background: '#0d1117' }}
                       loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
@@ -331,7 +326,7 @@ function MapInner({
 
       {/* ── OSM ────────────────────────────────────────────────────────────── */}
       {visible.osm && osmCams.map(cam => {
-        if (!cam.lat || !cam.lon || !isFinite(cam.lat) || !isFinite(cam.lon)) return null;
+        if (!hasCoordinates(cam)) return null;
         return (
           <Marker key={`osm-${cam.id}`} position={[cam.lat, cam.lon]} icon={icons.osm}>
             <Popup maxWidth={270}>
@@ -352,7 +347,7 @@ function MapInner({
 
       {/* ── Deckchair ──────────────────────────────────────────────────────── */}
       {visible.deckchair && deckCams.map(cam => {
-        if (!cam.lat || !cam.lon || !isFinite(cam.lat) || !isFinite(cam.lon)) return null;
+        if (!hasCoordinates(cam)) return null;
         return (
           <Marker key={`deck-${cam.id}`} position={[cam.lat, cam.lon]} icon={icons.deckchair}>
             <Popup maxWidth={270}>
@@ -397,17 +392,6 @@ function MapInner({
 
 // ── Public export (wraps MapContainer) ───────────────────────────────────────
 export default function LeafletMap(props: LeafletMapProps) {
-  // Fix default marker icon paths broken by webpack
-  useEffect(() => {
-    // @ts-expect-error _getIconUrl is internal
-    delete L.Icon.Default.prototype._getIconUrl;
-    L.Icon.Default.mergeOptions({
-      iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-      iconUrl:       'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-      shadowUrl:     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-    });
-  }, []);
-
   return (
     <MapContainer
       center={[20, 0]}
@@ -418,8 +402,9 @@ export default function LeafletMap(props: LeafletMapProps) {
       worldCopyJump
     >
       <TileLayer
-        url="https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png"
-        attribution='&copy; <a href="https://stadiamaps.com/" target="_blank">Stadia Maps</a> &copy; <a href="https://openmaptiles.org/" target="_blank">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>'
+        url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+        subdomains="abcd"
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
         maxZoom={20}
       />
       <MapInner {...props} />

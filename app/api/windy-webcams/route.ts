@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { validBbox } from '../../../lib/viewport';
 
 // ---------------------------------------------------------------------------
 // Windy Webcams API v3
@@ -13,7 +14,10 @@ const BASE_URL = 'https://api.windy.com/webcams/api/v3/webcams';
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const bbox    = searchParams.get('bbox') ?? '90,180,-90,-180';
-  const limit   = Math.min(Number(searchParams.get('limit') ?? '50'), 100);
+  const requestedLimit = Number(searchParams.get('limit') ?? '50');
+  if (!validBbox(bbox)) return NextResponse.json({ error: 'Invalid bbox. Expected north,east,south,west within geographic bounds.' }, { status: 400 });
+  if (!Number.isInteger(requestedLimit) || requestedLimit < 1) return NextResponse.json({ error: 'Limit must be a positive integer.' }, { status: 400 });
+  const limit = Math.min(requestedLimit, 50);
   const include = 'location,images,urls,player,categories';
 
   const apiKey = process.env.WINDY_WEBCAMS_API_KEY;
@@ -38,7 +42,7 @@ export async function GET(request: Request) {
 
     if (!res.ok) {
       return NextResponse.json(
-        { error: 'Windy API error', status: res.status, body: text },
+        { error: 'Windy API error', status: res.status },
         { status: 502 }
       );
     }
