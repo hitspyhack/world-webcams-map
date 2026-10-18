@@ -31,8 +31,3 @@ yarn-error.log*
 
 # Local browser smoke-test assets
 /.cache
-
-# Flight price watcher (secrets + runtime state)
-/tools/flight-price-watcher/.env
-/tools/flight-price-watcher/data/
-/tools/flight-price-watcher/*.log
