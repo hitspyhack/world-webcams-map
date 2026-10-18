@@ -1,0 +1,50 @@
+name: Flight price watch (LIS → CAI)
+
+on:
+  schedule:
+    # Every 6 hours (GitHub cron is UTC; exact minute may drift a little)
+    - cron: "23 */6 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  actions: write # needed to save the state cache
+
+concurrency:
+  group: flight-price-watch
+  cancel-in-progress: false
+
+jobs:
+  check-price:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Persist alert/price state between runs so you don't get duplicate alerts
+      - name: Restore watcher state
+        uses: actions/cache/restore@v4
+        with:
+          path: tools/flight-price-watcher/data
+          key: flight-watch-state-${{ github.run_id }}
+          restore-keys: |
+            flight-watch-state-
+
+      - name: Check flight price
+        env:
+          AMADEUS_CLIENT_ID: ${{ secrets.AMADEUS_CLIENT_ID }}
+          AMADEUS_CLIENT_SECRET: ${{ secrets.AMADEUS_CLIENT_SECRET }}
+          AMADEUS_ENV: ${{ vars.AMADEUS_ENV || 'test' }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: node tools/flight-price-watcher/watcher.mjs
+
+      - name: Save watcher state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: tools/flight-price-watcher/data
+          key: flight-watch-state-${{ github.run_id }}
