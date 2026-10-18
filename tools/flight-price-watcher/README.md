@@ -3,7 +3,7 @@
 Automatic price monitor for a **LIS → CAI round trip, 2 adults, cabin-backpack fare**:
 
 - **Departure:** 1 March 2027 · **Return:** 9 March 2027
-- **Alert rule:** Telegram message when the price drops **below 200€**
+- **Alert rule:** Telegram message when the price drops **below 200€ per person**
 - **Check frequency:** every 6 hours
 - Prices come from the **Amadeus Self-Service API** (free tier); the cheapest/basic
   fares it returns include a cabin backpack — checked bags cost extra, which matches
@@ -82,9 +82,8 @@ Everything is overridable via environment variables / `.env` — see `.env.examp
 The two you may want to tweak:
 
 - `THRESHOLD_EUR=200` — the alert price.
-- `THRESHOLD_SCOPE=total` — `total` alerts when **both tickets together** cost < 200€
-  (literal reading of "2 persons… below 200€"). Set to `per_person` if you meant
-  200€ per traveller (more realistic for this route).
+- `THRESHOLD_SCOPE=per_person` (default) — alerts when **each ticket** costs < 200€.
+  Set to `total` if you want the combined price for both travellers compared instead.
 
 ## How alerts behave
 

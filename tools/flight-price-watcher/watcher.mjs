@@ -48,9 +48,9 @@ const cfg = {
   adults: Number(process.env.ADULTS || 2),
   currency: process.env.CURRENCY || "EUR",
   thresholdEur: Number(process.env.THRESHOLD_EUR || 200),
-  // "total"      -> alert when the combined price for all travellers is below the threshold
   // "per_person" -> alert when (total / adults) is below the threshold
-  thresholdScope: (process.env.THRESHOLD_SCOPE || "total").toLowerCase(),
+  // "total"      -> alert when the combined price for all travellers is below the threshold
+  thresholdScope: (process.env.THRESHOLD_SCOPE || "per_person").toLowerCase(),
   intervalHours: Number(process.env.INTERVAL_HOURS || 6),
   amadeusEnv: (process.env.AMADEUS_ENV || "test").toLowerCase(), // "test" | "production"
   amadeusClientId: process.env.AMADEUS_CLIENT_ID || "",
