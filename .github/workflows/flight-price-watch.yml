@@ -4,7 +4,12 @@ on:
   schedule:
     # Every 6 hours (GitHub cron is UTC; exact minute may drift a little)
     - cron: "23 */6 * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      demo:
+        description: "Send a demo Telegram alert (tests the wiring end-to-end)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -38,7 +43,7 @@ jobs:
           SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: node tools/flight-price-watcher/watcher.mjs
+        run: node tools/flight-price-watcher/watcher.mjs ${{ inputs.demo == true && '--demo' || '' }}
 
       - name: Save watcher state
         if: always()
