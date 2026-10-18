@@ -2,8 +2,11 @@
 /**
  * Flight Price Watcher — LIS → CAI round trip, 2 adults, cabin backpack only.
  *
- * Checks the cheapest round-trip price via the Amadeus Self-Service API and
+ * Checks the cheapest round-trip price via SerpApi's Google Flights engine and
  * sends a Telegram message when the price drops below the configured threshold.
+ *
+ * (Previously used the Amadeus Self-Service API, which was decommissioned on
+ * 17 July 2026 — SerpApi returns real Google Flights prices instead.)
  *
  * Zero dependencies — requires Node >= 18 (global fetch).
  *
@@ -52,9 +55,7 @@ const cfg = {
   // "total"      -> alert when the combined price for all travellers is below the threshold
   thresholdScope: (process.env.THRESHOLD_SCOPE || "per_person").toLowerCase(),
   intervalHours: Number(process.env.INTERVAL_HOURS || 6),
-  amadeusEnv: (process.env.AMADEUS_ENV || "test").toLowerCase(), // "test" | "production"
-  amadeusClientId: process.env.AMADEUS_CLIENT_ID || "",
-  amadeusClientSecret: process.env.AMADEUS_CLIENT_SECRET || "",
+  serpapiKey: process.env.SERPAPI_KEY || "",
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || "",
   telegramChatId: process.env.TELEGRAM_CHAT_ID || "",
   stateDir: process.env.STATE_DIR || join(HERE, "data"),
@@ -63,9 +64,6 @@ const cfg = {
 const DEMO = ARGS.has("--demo");
 const DRY_RUN = ARGS.has("--dry-run");
 const LOOP = ARGS.has("--loop");
-
-const AMADEUS_HOST =
-  cfg.amadeusEnv === "production" ? "https://api.amadeus.com" : "https://test.api.amadeus.com";
 
 const STATE_FILE = join(cfg.stateDir, "state.json");
 const HISTORY_FILE = join(cfg.stateDir, "history.csv");
@@ -95,75 +93,74 @@ function appendHistory(row) {
   );
 }
 
-// ---------------------------------------------------------------- amadeus
-async function amadeusToken() {
-  const res = await fetch(`${AMADEUS_HOST}/v1/security/oauth2/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "client_credentials",
-      client_id: cfg.amadeusClientId,
-      client_secret: cfg.amadeusClientSecret,
-    }),
-  });
-  if (!res.ok) {
-    throw new Error(`Amadeus auth failed (${res.status}): ${await res.text()}`);
-  }
-  return (await res.json()).access_token;
-}
-
+// ---------------------------------------------------------------- serpapi (google flights)
 async function fetchCheapestOffer() {
-  const token = await amadeusToken();
   const params = new URLSearchParams({
-    originLocationCode: cfg.origin,
-    destinationLocationCode: cfg.destination,
-    departureDate: cfg.departureDate,
-    returnDate: cfg.returnDate,
+    engine: "google_flights",
+    departure_id: cfg.origin,
+    arrival_id: cfg.destination,
+    outbound_date: cfg.departureDate,
+    return_date: cfg.returnDate,
+    type: "1", // round trip
     adults: String(cfg.adults),
-    currencyCode: cfg.currency,
-    max: "20",
+    currency: cfg.currency,
+    hl: "en",
+    deep_search: "true", // same results as the Google Flights browser UI
+    api_key: cfg.serpapiKey,
   });
-  const res = await fetch(`${AMADEUS_HOST}/v2/shopping/flight-offers?${params}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const res = await fetch(`https://serpapi.com/search.json?${params}`);
   if (!res.ok) {
-    throw new Error(`Flight search failed (${res.status}): ${await res.text()}`);
+    throw new Error(`SerpApi request failed (${res.status}): ${await res.text()}`);
   }
   const body = await res.json();
-  const offers = body.data || [];
-  if (offers.length === 0) return null;
+  if (body.error) throw new Error(`SerpApi error: ${body.error}`);
 
-  const carriers = body.dictionaries?.carriers || {};
+  // Google Flights shows the TOTAL round-trip price for all passengers.
+  const offers = [...(body.best_flights || []), ...(body.other_flights || [])];
   let best = null;
   for (const offer of offers) {
-    const total = Number(offer.price?.grandTotal ?? offer.price?.total ?? NaN);
+    const total = Number(offer.price);
     if (!Number.isFinite(total)) continue;
     if (!best || total < best.total) {
-      const firstSeg = offer.itineraries?.[0]?.segments?.[0];
-      const code = firstSeg?.carrierCode || offer.validatingAirlineCodes?.[0] || "?";
+      const firstSeg = offer.flights?.[0];
       best = {
         total,
         perPerson: total / cfg.adults,
-        carrier: carriers[code] || code,
-        stopsOut: Math.max((offer.itineraries?.[0]?.segments?.length || 1) - 1, 0),
-        stopsBack: Math.max((offer.itineraries?.[1]?.segments?.length || 1) - 1, 0),
-        departAt: firstSeg?.departure?.at || cfg.departureDate,
+        carrier: firstSeg?.airline || "?",
+        stopsOut: Math.max((offer.flights?.length || 1) - 1, 0),
+        departAt: firstSeg?.departure_airport?.time || cfg.departureDate,
       };
     }
+  }
+
+  // Fallback: Google's own "lowest price" insight, if no structured offers came back.
+  if (!best && Number.isFinite(Number(body.price_insights?.lowest_price))) {
+    const total = Number(body.price_insights.lowest_price);
+    best = {
+      total,
+      perPerson: total / cfg.adults,
+      carrier: "see Google Flights",
+      stopsOut: null,
+      departAt: cfg.departureDate,
+    };
   }
   return best;
 }
 
 function demoOffer() {
-  const total = Number(process.env.DEMO_PRICE_EUR || 189.98);
+  const total = Number(process.env.DEMO_PRICE_EUR || 379.98);
   return {
     total,
     perPerson: total / cfg.adults,
     carrier: "Demo Airways",
     stopsOut: 1,
-    stopsBack: 1,
-    departAt: `${cfg.departureDate}T07:35:00`,
+    departAt: `${cfg.departureDate} 07:35`,
   };
+}
+
+function googleFlightsLink() {
+  const q = `Flights from ${cfg.origin} to ${cfg.destination} on ${cfg.departureDate} through ${cfg.returnDate}`;
+  return `https://www.google.com/travel/flights?q=${encodeURIComponent(q)}&curr=${cfg.currency}`;
 }
 
 // ---------------------------------------------------------------- telegram
@@ -190,19 +187,22 @@ function formatAlert(offer) {
     cfg.thresholdScope === "per_person"
       ? `below ${cfg.thresholdEur}€ per person`
       : `below ${cfg.thresholdEur}€ total`;
+  const stops =
+    offer.stopsOut === null
+      ? ""
+      : `\n🛫 ${offer.carrier} — ${offer.stopsOut === 0 ? "direct" : `${offer.stopsOut} stop(s)`} outbound`;
   return [
     `✈️ *Flight price alert — ${scopeLabel}!*`,
     ``,
     `*${cfg.origin} → ${cfg.destination}* round trip, ${cfg.adults} adults (cabin backpack fare)`,
     `🗓 ${cfg.departureDate} → ${cfg.returnDate}`,
     ``,
-    `💶 *Total: ${offer.total.toFixed(2)}€*  (${offer.perPerson.toFixed(2)}€ / person)`,
-    `🛫 ${offer.carrier} — ${offer.stopsOut === 0 ? "direct" : `${offer.stopsOut} stop(s)`} out, ${
-      offer.stopsBack === 0 ? "direct" : `${offer.stopsBack} stop(s)`
-    } back`,
-    `⏰ Departure: ${offer.departAt.replace("T", " ")}`,
+    `💶 *Total: ${offer.total.toFixed(2)}€*  (${offer.perPerson.toFixed(2)}€ / person)${stops}`,
+    `⏰ Departure: ${offer.departAt}`,
     ``,
-    `_Book soon — prices change fast. Check Google Flights / airline site to confirm._`,
+    `[Open in Google Flights](${googleFlightsLink()})`,
+    ``,
+    `_Book soon — prices change fast._`,
   ].join("\n");
 }
 
@@ -211,10 +211,10 @@ async function checkOnce() {
   const now = new Date().toISOString();
   console.log(`[${now}] Checking ${cfg.origin} → ${cfg.destination}, ${cfg.departureDate} → ${cfg.returnDate}, ${cfg.adults} adults…`);
 
-  if (!DEMO && (!cfg.amadeusClientId || !cfg.amadeusClientSecret)) {
+  if (!DEMO && !cfg.serpapiKey) {
     console.error(
-      "Missing AMADEUS_CLIENT_ID / AMADEUS_CLIENT_SECRET. " +
-        "Get free keys at https://developers.amadeus.com, or run with --demo to test."
+      "Missing SERPAPI_KEY. Get a free key at https://serpapi.com (250 searches/month), " +
+        "or run with --demo to test."
     );
     process.exitCode = 1;
     return;
