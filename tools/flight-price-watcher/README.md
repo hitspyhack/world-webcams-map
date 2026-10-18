@@ -3,7 +3,9 @@
 Automatic price monitor for a **LIS → CAI round trip, 2 adults, cabin-backpack fare**:
 
 - **Departure:** 1 March 2027 · **Return:** 9 March 2027
-- **Alert rule:** Telegram message when the price drops **below 200€ per person**
+- **Alert rule:** Telegram message when the price drops **below 250€ per person**
+- **Daily heartbeat:** one Telegram summary per day with the current cheapest
+  price, even when it's above the threshold — so you know the watcher is alive
 - **Check frequency:** every 6 hours, automatically via GitHub Actions
 - Prices come from **Google Flights via SerpApi** — real booking prices, free tier
   (250 searches/month; this watcher uses ~124). Basic fares include a cabin
@@ -46,7 +48,8 @@ Just add the secrets in your GitHub repo:
 | `TELEGRAM_CHAT_ID` | your chat id |
 
 You can trigger a check manually anytime from the *Actions* tab
-(*Flight price watch → Run workflow*).
+(*Flight price watch → Run workflow*). Tick the **"Send a demo Telegram alert"**
+checkbox there to send a fake alert and verify the Telegram wiring end-to-end.
 
 > ⚠️ GitHub disables scheduled workflows after **60 days of repo inactivity**.
 > Any commit (or re-enabling it in the Actions tab) keeps it alive.
@@ -82,9 +85,12 @@ node watcher.mjs --demo             # fakes the price and really sends the Teleg
 Everything is overridable via environment variables / `.env` — see `.env.example`.
 The two you may want to tweak:
 
-- `THRESHOLD_EUR=200` — the alert price.
-- `THRESHOLD_SCOPE=per_person` (default) — alerts when **each ticket** costs < 200€.
+- `THRESHOLD_EUR=250` — the alert price.
+- `THRESHOLD_SCOPE=per_person` (default) — alerts when **each ticket** costs < 250€.
   Set to `total` if you want the combined price for both travellers compared instead.
+- `DAILY_SUMMARY=true` — daily heartbeat message; `SUMMARY_AFTER_HOUR_UTC=6`
+  controls when (first check at/after that UTC hour). Set `DAILY_SUMMARY=false`
+  to go back to alert-only silence.
 
 ## How alerts behave
 

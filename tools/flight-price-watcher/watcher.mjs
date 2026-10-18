@@ -50,11 +50,16 @@ const cfg = {
   returnDate: process.env.RETURN_DATE || "2027-03-09",
   adults: Number(process.env.ADULTS || 2),
   currency: process.env.CURRENCY || "EUR",
-  thresholdEur: Number(process.env.THRESHOLD_EUR || 200),
+  thresholdEur: Number(process.env.THRESHOLD_EUR || 250),
   // "per_person" -> alert when (total / adults) is below the threshold
   // "total"      -> alert when the combined price for all travellers is below the threshold
   thresholdScope: (process.env.THRESHOLD_SCOPE || "per_person").toLowerCase(),
   intervalHours: Number(process.env.INTERVAL_HOURS || 6),
+  // Daily heartbeat: one Telegram summary per day with the current cheapest price,
+  // even when it's above the threshold. Set DAILY_SUMMARY=false to disable.
+  dailySummary: (process.env.DAILY_SUMMARY || "true").toLowerCase() !== "false",
+  // The summary is sent by the first check at/after this UTC hour each day.
+  summaryAfterHourUtc: Number(process.env.SUMMARY_AFTER_HOUR_UTC || 6),
   serpapiKey: process.env.SERPAPI_KEY || "",
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || "",
   telegramChatId: process.env.TELEGRAM_CHAT_ID || "",
@@ -206,6 +211,29 @@ function formatAlert(offer) {
   ].join("\n");
 }
 
+function formatSummary(offer, prevTotal) {
+  const target = cfg.thresholdScope === "per_person" ? cfg.thresholdEur : cfg.thresholdEur / cfg.adults;
+  const gap = offer.perPerson - target;
+  const gapLine =
+    gap <= 0
+      ? `🎯 At or below the target of ${cfg.thresholdEur}€ ${cfg.thresholdScope === "per_person" ? "per person" : "total"}!`
+      : `🎯 Target: below ${cfg.thresholdEur}€${cfg.thresholdScope === "per_person" ? "/person" : " total"} — currently ${gap.toFixed(2)}€/person above`;
+  let trendLine = "";
+  if (Number.isFinite(prevTotal) && Math.abs(prevTotal - offer.total) >= 0.01) {
+    const diff = offer.total - prevTotal;
+    trendLine = `\n${diff < 0 ? "📉" : "📈"} ${diff < 0 ? "Down" : "Up"} ${Math.abs(diff).toFixed(2)}€ since yesterday's summary`;
+  }
+  return [
+    `📊 *Daily price check — ${cfg.origin} → ${cfg.destination}*`,
+    ``,
+    `🗓 ${cfg.departureDate} → ${cfg.returnDate} · ${cfg.adults} adults, round trip`,
+    `💶 Cheapest today: *${offer.total.toFixed(2)}€ total* (${offer.perPerson.toFixed(2)}€ / person) — ${offer.carrier}`,
+    gapLine + trendLine,
+    ``,
+    `[Open in Google Flights](${googleFlightsLink()})`,
+  ].join("\n");
+}
+
 // ---------------------------------------------------------------- core check
 async function checkOnce() {
   const now = new Date().toISOString();
@@ -246,6 +274,7 @@ async function checkOnce() {
   const state = loadState();
   state.lastPrice = { total: offer.total, at: now };
 
+  let alertSentNow = false;
   if (below) {
     const last = state.lastAlert;
     const hoursSince = last ? (Date.now() - new Date(last.at).getTime()) / 36e5 : Infinity;
@@ -254,8 +283,21 @@ async function checkOnce() {
     if (priceDropped || hoursSince >= 24) {
       await sendTelegram(formatAlert(offer));
       state.lastAlert = { total: offer.total, at: now };
+      alertSentNow = true;
     } else {
       console.log(`Still below threshold, but already alerted ${hoursSince.toFixed(1)}h ago — skipping duplicate.`);
+    }
+  }
+
+  // Daily heartbeat summary (skipped when an alert already went out this run).
+  if (cfg.dailySummary && !alertSentNow) {
+    const today = now.slice(0, 10);
+    const lastSummaryDay = state.lastSummary?.date;
+    const hourUtc = new Date(now).getUTCHours();
+    if (lastSummaryDay !== today && hourUtc >= cfg.summaryAfterHourUtc) {
+      await sendTelegram(formatSummary(offer, state.lastSummary?.total));
+      state.lastSummary = { date: today, total: offer.total };
+      console.log("Daily summary sent.");
     }
   }
 
