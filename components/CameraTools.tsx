@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import type { CamLightboxEntry } from './CamLightbox';
 import { cameraContextUrls, hasCoordinates } from '../lib/cameras';
-import { downloadCapture } from '../lib/capture';
+import { buildCapture, downloadBlob } from '../lib/capture';
 import { mediaLabel } from '../lib/media';
 
 export default function CameraTools({ entry }: { entry: CamLightboxEntry }) {
@@ -29,11 +29,60 @@ export default function CameraTools({ entry }: { entry: CamLightboxEntry }) {
     return () => controller.abort();
   }, [google, coords, entry.lat, entry.lon]);
 
+  // Native iOS shell bridge: the shell saves the snapshot to the Photos
+  // library and reports back with a result event shown in the status line.
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ ok: boolean; message: string }>).detail;
+      if (detail && typeof detail.message === 'string') setMessage(detail.message);
+    };
+    window.addEventListener('world-webcams:saveToPhotos:result', handler);
+    return () => window.removeEventListener('world-webcams:saveToPhotos:result', handler);
+  }, []);
+
+  // Native iOS shell bridge: results of handing a capture ZIP to the shell
+  // (failures surface here; success presents a share/save sheet).
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ ok: boolean; message: string }>).detail;
+      if (detail && typeof detail.message === 'string') setMessage(detail.message);
+    };
+    window.addEventListener('world-webcams:captureZIP:result', handler);
+    return () => window.removeEventListener('world-webcams:captureZIP:result', handler);
+  }, []);
+
+  type NativeCaptureBridge = { postMessage(message: unknown): void };
+  const nativeCaptureBridge = (): NativeCaptureBridge | null => {
+    const webkitBridge = (window as unknown as {
+      webkit?: { messageHandlers?: { worldWebcamsCameras?: NativeCaptureBridge } };
+    }).webkit;
+    return webkitBridge?.messageHandlers?.worldWebcamsCameras ?? null;
+  };
+
   const capture = async () => {
     setBusy(true); setMessage('Retrieving image and calculating SHA-256…');
     try {
-      const record = await downloadCapture(entry, AbortSignal.timeout(20_000));
-      setMessage(`Capture ZIP downloaded · SHA-256 ${record.file.sha256}. Retrieval time is not scene time.`);
+      const built = await buildCapture(entry, AbortSignal.timeout(20_000));
+      const bridge = nativeCaptureBridge();
+      if (bridge) {
+        // Native shell: WKWebView can't trigger browser downloads, so hand
+        // the ZIP over base64-encoded for the share/save sheet.
+        const bytes = built.archive;
+        let binary = '';
+        const chunkSize = 0x8000;
+        for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+          binary += String.fromCharCode.apply(null, bytes.subarray(offset, offset + chunkSize) as unknown as number[]);
+        }
+        bridge.postMessage({
+          kind: 'captureZIP',
+          fileName: built.filename,
+          base64: btoa(binary),
+        });
+        setMessage('Capture ready — choose where to save it.');
+      } else {
+        downloadBlob(new Blob([built.archive], { type: 'application/zip' }), built.filename);
+        setMessage(`Capture ZIP downloaded · SHA-256 ${built.manifest.file.sha256}. Retrieval time is not scene time.`);
+      }
     } catch (error) { setMessage(`Capture unavailable: ${error instanceof Error ? error.message : 'Browser or provider restrictions'}. No restrictions are bypassed.`); }
     finally { setBusy(false); }
   };
@@ -45,6 +94,22 @@ export default function CameraTools({ entry }: { entry: CamLightboxEntry }) {
       {entry.description && <p>{entry.description}</p>}
       <div className="workspace-actions">
         {entry.imageUrl && <button disabled={busy} onClick={() => void capture()}>{busy ? 'Capturing…' : 'Capture image + SHA-256 manifest'}</button>}
+        {entry.imageUrl && (
+          <button onClick={() => {
+            window.dispatchEvent(new CustomEvent('world-webcams:saveToPhotos', {
+              detail: { imageUrl: entry.imageUrl },
+            }));
+            setMessage('Saving snapshot to Photos…');
+          }}>Save to Photos</button>
+        )}
+        {typeof navigator.share === 'function' && (
+          <button onClick={() => {
+            void navigator.share({
+              title: entry.title,
+              url: entry.linkUrl ?? window.location.href,
+            }).catch(() => {});
+          }}>Share camera link</button>
+        )}
         {links && <>
           <button onClick={() => {
             void navigator.clipboard?.writeText(`${entry.title}\n${entry.lat}, ${entry.lon}\n${entry.linkUrl ?? ''}`)

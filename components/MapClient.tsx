@@ -1,7 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useState, useMemo, useCallback, useRef } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import type { GlobeViewHandle } from './GlobeView';
 import type { GlobeCam } from './GlobeView';
 import { ASIA_SOURCES, EU_COUNTRIES } from '../lib/sources';
@@ -260,6 +260,44 @@ export default function MapClient() {
   const handleWindyCount = useCallback(() => {}, []);
   const handleFlyToDone = useCallback(() => setFlyTo(null), []);
 
+  // Native iOS shell bridge: quick-jump to a region. The shell dispatches
+  // a 'worldwebcams:flyTo' CustomEvent with { lat, lon, zoom? } detail;
+  // the active view flies (map) or rotates (globe) to the target.
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ lat: number; lon: number; zoom?: number }>).detail;
+      if (!detail || typeof detail.lat !== 'number' || typeof detail.lon !== 'number') return;
+      if (mode === 'map') {
+        setFlyTo({ lat: detail.lat, lon: detail.lon, zoom: detail.zoom });
+      } else {
+        globeRef.current?.rotateTo(detail.lon, detail.lat);
+      }
+    };
+    window.addEventListener('worldwebcams:flyTo', handler);
+    return () => window.removeEventListener('worldwebcams:flyTo', handler);
+  }, [mode]);
+
+  // Native iOS shell bridge: open a saved camera from the native Saved
+  // screen. The shell dispatches 'world-webcams:openSavedCamera' with
+  // { lat, lon } detail; the matching camera opens in the map with its
+  // viewer, or the map flies there when the camera isn't currently loaded.
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ lat: number; lon: number }>).detail;
+      if (!detail || typeof detail.lat !== 'number' || typeof detail.lon !== 'number') return;
+      const match = globeCams.find(cam =>
+        Math.abs(cam.lat - detail.lat) < 0.005 && Math.abs(cam.lon - detail.lon) < 0.005);
+      if (match) {
+        handleGlobeCamClick(match);
+        openExplorerCamera(match);
+      } else {
+        setFlyTo({ lat: detail.lat, lon: detail.lon, zoom: 13 });
+      }
+    };
+    window.addEventListener('world-webcams:openSavedCamera', handler);
+    return () => window.removeEventListener('world-webcams:openSavedCamera', handler);
+  }, [globeCams, openExplorerCamera]);
+
   const countryList: CountryEntry[] = useMemo(() => {
     const counts: Record<string, { name: string; lat: number; lon: number; count: number }> = {};
     const addCode = (raw?: string) => {
@@ -421,6 +459,10 @@ export default function MapClient() {
 
   const openExplorerCamera = useCallback((camera: GlobeCam) => {
     globeRef.current?.rotateTo(camera.lon, camera.lat);
+    // Notify the native iOS shell so it can track recently opened cameras.
+    window.dispatchEvent(new CustomEvent('world-webcams:cameraOpened', {
+      detail: { lat: camera.lat, lon: camera.lon, title: camera.title, source: camera.source, imageUrl: camera.imageUrl },
+    }));
     setExplorerCamera({ ...camera, source: camera.source ?? 'webcam' });
   }, []);
   const grandTotal = globeCams.filter(camera => camera.mediaKind !== 'directory').length;
