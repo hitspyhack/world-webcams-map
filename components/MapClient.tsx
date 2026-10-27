@@ -461,7 +461,7 @@ export default function MapClient() {
     globeRef.current?.rotateTo(camera.lon, camera.lat);
     // Notify the native iOS shell so it can track recently opened cameras.
     window.dispatchEvent(new CustomEvent('world-webcams:cameraOpened', {
-      detail: { lat: camera.lat, lon: camera.lon, title: camera.title, source: camera.source, imageUrl: camera.imageUrl },
+      detail: { lat: camera.lat, lon: camera.lon, title: camera.title, source: camera.source, imageUrl: camera.imageUrl, positionPrecision: camera.positionPrecision },
     }));
     setExplorerCamera({ ...camera, source: camera.source ?? 'webcam' });
   }, []);
